@@ -504,3 +504,168 @@ At session start, automatically search the last 3 sessions for topics related to
 | TestReasonRequired | skill_manager | 5 | all new |
 | **Subtotal** | | **65** | |
 | **Total** | | **125** | **~60 new or rewritten** |
+
+---
+
+## Appendix: Full pytest Output (run evidence)
+
+Run command:
+
+```
+python -m pytest tests/tools/test_memory_tool.py tests/tools/test_skill_manager_tool.py -v --override-ini="addopts=" --tb=short
+```
+
+Environment: Python 3.13.5 · pytest 8.4.2 · platform win32 · 2026-04-11
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\simon\AppData\Local\Programs\Python\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\simon\Downloads\hermes_agent_collection\hermes-agent
+configfile: pyproject.toml
+plugins: anyio-4.9.0, langsmith-0.3.45, asyncio-1.3.0, cov-7.0.0, mock-3.15.1, timeout-2.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 125 items
+
+tests/tools/test_memory_tool.py::TestMemorySchema::test_discourages_diary_style_task_logs PASSED [  0%]
+tests/tools/test_memory_tool.py::TestMemorySchema::test_schema_exposes_priority_param PASSED [  1%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_clean_content_passes PASSED [  2%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_prompt_injection_blocked PASSED [  3%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_exfiltration_blocked PASSED [  4%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_ssh_backdoor_blocked PASSED [  4%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_invisible_unicode_blocked PASSED [  5%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_role_hijack_blocked PASSED [  6%]
+tests/tools/test_memory_tool.py::TestScanMemoryContent::test_system_override_blocked PASSED [  7%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_entry PASSED [  8%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_to_user PASSED [  8%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_empty_rejected PASSED [  9%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_duplicate_rejected PASSED [ 10%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_injection_blocked PASSED [ 11%]
+tests/tools/test_memory_tool.py::TestMemoryStoreAdd::test_add_invalid_priority_rejected PASSED [ 12%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_entry PASSED [ 12%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_no_match PASSED [ 13%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_ambiguous_match PASSED [ 14%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_empty_old_text_rejected PASSED [ 15%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_empty_new_content_rejected PASSED [ 16%]
+tests/tools/test_memory_tool.py::TestMemoryStoreReplace::test_replace_injection_blocked PASSED [ 16%]
+tests/tools/test_memory_tool.py::TestMemoryStoreRemove::test_remove_entry PASSED [ 17%]
+tests/tools/test_memory_tool.py::TestMemoryStoreRemove::test_remove_no_match PASSED [ 18%]
+tests/tools/test_memory_tool.py::TestMemoryStoreRemove::test_remove_empty_old_text PASSED [ 19%]
+tests/tools/test_memory_tool.py::TestMemoryStorePersistence::test_save_and_load_roundtrip PASSED [ 20%]
+tests/tools/test_memory_tool.py::TestMemoryStorePersistence::test_deduplication_on_load PASSED [ 20%]
+tests/tools/test_memory_tool.py::TestMemoryStoreSnapshot::test_snapshot_shows_session_additions PASSED [ 21%]
+tests/tools/test_memory_tool.py::TestMemoryStoreSnapshot::test_base_snapshot_stable_when_no_additions PASSED [ 22%]
+tests/tools/test_memory_tool.py::TestMemoryStoreSnapshot::test_empty_snapshot_returns_none PASSED [ 23%]
+tests/tools/test_memory_tool.py::TestMemoryStoreSnapshot::test_session_additions_cleared_on_reload PASSED [ 24%]
+tests/tools/test_memory_tool.py::TestMemoryStoreSnapshot::test_session_addition_only_snapshot_when_no_base PASSED [ 24%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_high_priority_prefix_stored PASSED [ 25%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_normal_priority_no_prefix PASSED [ 26%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_ephemeral_prefix_stored PASSED [ 27%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_high_priority_sorts_first PASSED [ 28%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_ephemeral_expires_on_reload PASSED [ 28%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_non_expired_ephemeral_kept PASSED [ 29%]
+tests/tools/test_memory_tool.py::TestMemoryPriority::test_high_not_auto_evicted_when_limit_hit PASSED [ 30%]
+tests/tools/test_memory_tool.py::TestContradictionDetection::test_no_overlap_no_warning PASSED [ 31%]
+tests/tools/test_memory_tool.py::TestContradictionDetection::test_overlap_above_threshold_returns_warning PASSED [ 32%]
+tests/tools/test_memory_tool.py::TestContradictionDetection::test_add_still_succeeds_when_overlap_detected PASSED [ 32%]
+tests/tools/test_memory_tool.py::TestContradictionDetection::test_exact_duplicate_not_flagged_as_overlap PASSED [ 33%]
+tests/tools/test_memory_tool.py::TestDetectOverlapUnit::test_high_overlap_detected PASSED [ 34%]
+tests/tools/test_memory_tool.py::TestDetectOverlapUnit::test_low_overlap_not_detected PASSED [ 35%]
+tests/tools/test_memory_tool.py::TestDetectOverlapUnit::test_exact_dup_excluded PASSED [ 36%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_parse_high PASSED [ 36%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_parse_ephemeral PASSED [ 37%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_parse_normal PASSED [ 38%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_is_expired_past_date PASSED [ 39%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_is_expired_future_date PASSED [ 40%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_is_expired_normal_entry PASSED [ 40%]
+tests/tools/test_memory_tool.py::TestPriorityHelpers::test_sort_high_first PASSED [ 41%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_no_store_returns_error PASSED [ 42%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_invalid_target PASSED [ 43%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_unknown_action PASSED [ 44%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_add_via_tool PASSED [ 44%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_add_with_high_priority PASSED [ 45%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_add_with_ephemeral_priority PASSED [ 46%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_replace_requires_old_text PASSED [ 47%]
+tests/tools/test_memory_tool.py::TestMemoryToolDispatcher::test_remove_requires_old_text PASSED [ 48%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_valid_names PASSED [ 48%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_empty_name PASSED [ 49%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_too_long PASSED [ 50%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_uppercase_rejected PASSED [ 51%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_starts_with_hyphen_rejected PASSED [ 52%]
+tests/tools/test_skill_manager_tool.py::TestValidateName::test_special_chars_rejected PASSED [ 52%]
+tests/tools/test_skill_manager_tool.py::TestValidateCategory::test_valid_categories PASSED [ 53%]
+tests/tools/test_skill_manager_tool.py::TestValidateCategory::test_path_traversal_rejected PASSED [ 54%]
+tests/tools/test_skill_manager_tool.py::TestValidateCategory::test_absolute_path_rejected PASSED [ 55%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_valid_content PASSED [ 56%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_empty_content PASSED [ 56%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_no_frontmatter PASSED [ 57%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_unclosed_frontmatter PASSED [ 58%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_missing_name_field PASSED [ 59%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_missing_description_field PASSED [ 60%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_no_body_after_frontmatter PASSED [ 60%]
+tests/tools/test_skill_manager_tool.py::TestValidateFrontmatter::test_invalid_yaml PASSED [ 61%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_valid_paths PASSED [ 62%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_empty_path PASSED [ 63%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_path_traversal_blocked PASSED [ 64%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_disallowed_subdirectory PASSED [ 64%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_directory_only_rejected PASSED [ 65%]
+tests/tools/test_skill_manager_tool.py::TestValidateFilePath::test_root_level_file_rejected PASSED [ 66%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_skill PASSED [ 67%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_with_category PASSED [ 68%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_duplicate_blocked PASSED [ 68%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_invalid_name PASSED [ 69%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_invalid_content PASSED [ 70%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_rejects_category_traversal PASSED [ 71%]
+tests/tools/test_skill_manager_tool.py::TestCreateSkill::test_create_rejects_absolute_category PASSED [ 72%]
+tests/tools/test_skill_manager_tool.py::TestEditSkill::test_edit_existing_skill PASSED [ 72%]
+tests/tools/test_skill_manager_tool.py::TestEditSkill::test_edit_nonexistent_skill PASSED [ 73%]
+tests/tools/test_skill_manager_tool.py::TestEditSkill::test_edit_invalid_content_rejected PASSED [ 74%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_unique_match PASSED [ 75%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_nonexistent_string PASSED [ 76%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_ambiguous_match_rejected PASSED [ 76%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_replace_all PASSED [ 77%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_supporting_file PASSED [ 78%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_skill_not_found PASSED [ 79%]
+tests/tools/test_skill_manager_tool.py::TestPatchSkill::test_patch_supporting_file_symlink_escape_blocked PASSED [ 80%]
+tests/tools/test_skill_manager_tool.py::TestDeleteSkill::test_delete_existing PASSED [ 80%]
+tests/tools/test_skill_manager_tool.py::TestDeleteSkill::test_delete_nonexistent PASSED [ 81%]
+tests/tools/test_skill_manager_tool.py::TestDeleteSkill::test_delete_cleans_empty_category_dir PASSED [ 82%]
+tests/tools/test_skill_manager_tool.py::TestWriteFile::test_write_reference_file PASSED [ 83%]
+tests/tools/test_skill_manager_tool.py::TestWriteFile::test_write_to_nonexistent_skill PASSED [ 84%]
+tests/tools/test_skill_manager_tool.py::TestWriteFile::test_write_to_disallowed_path PASSED [ 84%]
+tests/tools/test_skill_manager_tool.py::TestWriteFile::test_write_symlink_escape_blocked PASSED [ 85%]
+tests/tools/test_skill_manager_tool.py::TestRemoveFile::test_remove_existing_file PASSED [ 86%]
+tests/tools/test_skill_manager_tool.py::TestRemoveFile::test_remove_nonexistent_file PASSED [ 87%]
+tests/tools/test_skill_manager_tool.py::TestRemoveFile::test_remove_symlink_escape_blocked PASSED [ 88%]
+tests/tools/test_skill_manager_tool.py::TestSkillManageDispatcher::test_unknown_action PASSED [ 88%]
+tests/tools/test_skill_manager_tool.py::TestSkillManageDispatcher::test_create_without_content PASSED [ 89%]
+tests/tools/test_skill_manager_tool.py::TestSkillManageDispatcher::test_patch_without_old_string PASSED [ 90%]
+tests/tools/test_skill_manager_tool.py::TestSkillManageDispatcher::test_full_create_via_dispatcher PASSED [ 91%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_patch_writes_history_file PASSED [ 92%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_history_contains_old_and_new_blocks PASSED [ 92%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_history_contains_reason PASSED [ 93%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_history_is_append_only PASSED [ 94%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_edit_writes_history PASSED [ 95%]
+tests/tools/test_skill_manager_tool.py::TestSkillPatchHistory::test_append_skill_history_helper PASSED [ 96%]
+tests/tools/test_skill_manager_tool.py::TestReasonRequired::test_patch_without_reason_returns_error PASSED [ 96%]
+tests/tools/test_skill_manager_tool.py::TestReasonRequired::test_edit_without_reason_returns_error PASSED [ 97%]
+tests/tools/test_skill_manager_tool.py::TestReasonRequired::test_patch_with_reason_succeeds PASSED [ 98%]
+tests/tools/test_skill_manager_tool.py::TestReasonRequired::test_edit_with_reason_succeeds PASSED [ 99%]
+tests/tools/test_skill_manager_tool.py::TestReasonRequired::test_create_does_not_require_reason PASSED [100%]
+
+============================== warnings summary ===============================
+tests/tools/test_memory_tool.py::TestMemorySchema::test_discourages_diary_style_task_logs
+  C:\Users\simon\Downloads\hermes_agent_collection\hermes-agent\tests\conftest.py:91: DeprecationWarning: There is no current event loop
+    loop = asyncio.get_event_loop_policy().get_event_loop()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 125 passed, 1 warning in 0.78s ========================
+```
+
+**Note on the warning.** The single `DeprecationWarning: There is no current event loop` comes from `tests/conftest.py:91`, which calls `asyncio.get_event_loop_policy().get_event_loop()` in a fixture that runs before every test. This is pre-existing infrastructure code unrelated to our changes; Python 3.10+ deprecated implicit event loop creation. It does not affect test correctness and is present in the upstream test suite.
+
+**Note on `addopts`.** The project's `pyproject.toml` sets `addopts = "-m 'not integration' -n auto"` (parallel execution via `pytest-xdist`). The `--override-ini="addopts="` flag above clears this because `pytest-xdist` is not installed in this environment. On a full Linux development environment with all dependencies installed, the equivalent command is simply:
+
+```
+python -m pytest tests/tools/test_memory_tool.py tests/tools/test_skill_manager_tool.py -v
+```
