@@ -10,7 +10,9 @@ All logic lives in shared do_* functions. The CLI entry point and slash command
 handler are thin wrappers that parse args and delegate.
 """
 
+import difflib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -668,6 +670,131 @@ def do_uninstall(name: str, console: Optional[Console] = None,
         c.print(f"[bold red]Error:[/] {msg}\n")
 
 
+def _parse_last_history_record(history_text: str):
+    """
+    Parse the most recent patch/edit/write record from SKILL_HISTORY.md text.
+
+    Returns (file_path, old_text, new_text) or (None, None, None) if not found.
+    Skips 'rollback' records — we want the last non-rollback state to restore.
+    """
+    # Split on section headers: ## <timestamp> — <action>
+    sections = re.split(r'\n(?=## \d{4}-\d{2}-\d{2}T)', history_text)
+    # Process from newest to oldest
+    for section in reversed(sections):
+        action_match = re.match(r'## \S+ — (\w+)', section)
+        if not action_match:
+            continue
+        action = action_match.group(1)
+        if action == "rollback":
+            continue  # skip rollback markers; look for the real last change
+
+        file_match = re.search(r'\*\*File:\*\* (.+)', section)
+        old_match = re.search(r'### Old\n```text\n(.*?)\n```', section, re.DOTALL)
+        new_match = re.search(r'### New\n```text\n(.*?)\n```', section, re.DOTALL)
+
+        if file_match and old_match and new_match:
+            return file_match.group(1).strip(), old_match.group(1), new_match.group(1)
+    return None, None, None
+
+
+def do_rollback(
+    name: str,
+    skip_confirm: bool = False,
+    console: Optional[Console] = None,
+) -> None:
+    """
+    Restore a skill to its state before the most recent patch or edit.
+
+    Reads SKILL_HISTORY.md, finds the last non-rollback record, shows a diff
+    preview, prompts for confirmation, writes the old content back, and appends
+    a rollback record to the history (keeping the log append-only).
+    """
+    from tools.skill_manager_tool import (
+        _find_skill, _atomic_write_text, _append_skill_history,
+        SKILL_HISTORY_FILE,
+    )
+
+    c = console or _console
+
+    existing = _find_skill(name)
+    if not existing:
+        c.print(f"[bold red]Error:[/] Skill '{name}' not found.\n")
+        return
+
+    skill_dir = existing["path"]
+    history_path = skill_dir / SKILL_HISTORY_FILE
+
+    if not history_path.exists():
+        c.print(f"[bold yellow]No history found for '{name}'.[/] Nothing to roll back.\n")
+        return
+
+    history_text = history_path.read_text(encoding="utf-8")
+    file_path, old_text, new_text = _parse_last_history_record(history_text)
+
+    if file_path is None:
+        c.print(f"[bold yellow]No restorable record found in history for '{name}'.[/]\n")
+        return
+
+    # Determine target file
+    target = skill_dir / file_path
+    current_text = target.read_text(encoding="utf-8") if target.exists() else ""
+
+    # Show diff preview
+    diff_lines = list(difflib.unified_diff(
+        new_text.splitlines(keepends=True),
+        old_text.splitlines(keepends=True),
+        fromfile=f"{file_path} (current)",
+        tofile=f"{file_path} (restored)",
+        lineterm="",
+    ))
+    if diff_lines:
+        c.print(f"\n[bold]Rollback preview for '{name}' ({file_path}):[/]")
+        for line in diff_lines[:60]:
+            if line.startswith("+"):
+                c.print(f"[green]{line}[/]", end="")
+            elif line.startswith("-"):
+                c.print(f"[red]{line}[/]", end="")
+            else:
+                c.print(line, end="")
+        if len(diff_lines) > 60:
+            c.print(f"\n[dim]... and {len(diff_lines) - 60} more lines[/]")
+        c.print()
+    else:
+        c.print(f"[dim]No visible diff — file already matches the rollback target.[/]\n")
+
+    if not skip_confirm:
+        c.print(f"[bold]Restore '{name}' ({file_path}) to its previous version?[/]")
+        try:
+            answer = input("Restore? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer not in ("y", "yes"):
+            c.print("[dim]Cancelled.[/]\n")
+            return
+
+    # Write old content back
+    _atomic_write_text(target, old_text)
+
+    # Append a rollback record to keep history append-only
+    _append_skill_history(
+        skill_dir=skill_dir,
+        action="rollback",
+        reason="Rolled back via CLI",
+        file_path=file_path,
+        old_text=new_text,   # what was there before the rollback
+        new_text=old_text,   # what it's been restored to
+    )
+
+    # Invalidate prompt cache
+    try:
+        from agent.prompt_builder import clear_skills_system_prompt_cache
+        clear_skills_system_prompt_cache(clear_snapshot=True)
+    except Exception:
+        pass
+
+    c.print(f"[bold green]Rolled back '{name}' ({file_path}) to previous version.[/]\n")
+
+
 def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> None:
     """Manage taps (custom GitHub repo sources)."""
     from tools.skills_hub import TapsManager
@@ -991,6 +1118,8 @@ def skills_command(args) -> None:
         do_audit(name=getattr(args, "name", None))
     elif action == "uninstall":
         do_uninstall(args.name)
+    elif action == "rollback":
+        do_rollback(args.name, skip_confirm=getattr(args, "yes", False))
     elif action == "publish":
         do_publish(
             args.skill_path,
@@ -1013,7 +1142,7 @@ def skills_command(args) -> None:
             return
         do_tap(tap_action, repo=repo)
     else:
-        _console.print("Usage: hermes skills [browse|search|install|inspect|list|check|update|audit|uninstall|publish|snapshot|tap]\n")
+        _console.print("Usage: hermes skills [browse|search|install|inspect|list|check|update|audit|uninstall|rollback|publish|snapshot|tap]\n")
         _console.print("Run 'hermes skills <command> --help' for details.\n")
 
 

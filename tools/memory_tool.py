@@ -9,30 +9,46 @@ Provides bounded, file-backed memory that persists across sessions. Two stores:
     expectations, workflow habits)
 
 Both are injected into the system prompt as a frozen snapshot at session start.
-Mid-session writes update files on disk immediately (durable) but do NOT change
-the system prompt -- this preserves the prefix cache for the entire session.
-The snapshot refreshes on the next session start.
+Mid-session writes update files on disk immediately (durable). For the base snapshot,
+the content is frozen to preserve the Anthropic prefix cache. However, entries added
+*during* the current session are appended in a separate "Added this session" block so
+the LLM can see them immediately without waiting for a full session restart.
 
 Entry delimiter: § (section sign). Entries can be multiline.
 Character limits (not tokens) because char counts are model-independent.
+
+Priority tiers:
+  - high:      [HIGH] prefix — sorted first, never auto-evicted on char overflow.
+  - normal:    no prefix — backward compatible with existing MEMORY.md content.
+  - ephemeral: [EPHEMERAL expires=YYYY-MM-DD] prefix — auto-dropped after expiry date.
 
 Design:
 - Single `memory` tool with action parameter: add, replace, remove, read
 - replace/remove use short unique substring matching (not full text or IDs)
 - Behavioral guidance lives in the tool schema description
-- Frozen snapshot pattern: system prompt is stable, tool responses show live state
+- Frozen snapshot pattern: system prompt base is stable for cache; session additions
+  appended live
 """
 
-import fcntl
 import json
 import logging
 import os
 import re
+import string
+import sys
 import tempfile
 from contextlib import contextmanager
+from datetime import date, timedelta
 from pathlib import Path
 from hermes_constants import get_hermes_home
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
+# fcntl is Unix-only. Hermes does not officially support Windows (requires WSL2),
+# but we guard the import so the module can be imported on Windows for testing.
+if sys.platform != "win32":
+    import fcntl
+else:
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +66,17 @@ def get_memory_dir() -> Path:
 MEMORY_DIR = get_memory_dir()
 
 ENTRY_DELIMITER = "\n§\n"
+
+# Valid priority values for the add() action.
+VALID_PRIORITIES = ("high", "normal", "ephemeral")
+_DEFAULT_EPHEMERAL_DAYS = 30
+
+# Stopwords stripped before overlap computation (contradiction detection).
+_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "of", "to", "in", "for",
+    "and", "or", "i", "my", "me", "user", "be", "it", "this", "that",
+    "with", "on", "at", "by", "from", "as", "do", "not", "no",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -97,13 +124,96 @@ def _scan_memory_content(content: str) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Priority / expiry helpers
+# ---------------------------------------------------------------------------
+
+def _today() -> date:
+    """Return today's date. Isolated so tests can monkeypatch it."""
+    return date.today()
+
+
+def _make_ephemeral_prefix(expires: date) -> str:
+    return f"[EPHEMERAL expires={expires.isoformat()}]"
+
+
+def _parse_entry_priority(entry: str) -> Tuple[str, str]:
+    """
+    Parse the priority prefix from a raw stored entry.
+
+    Returns (priority, bare_content) where priority is one of
+    "high", "ephemeral", "normal".  bare_content strips the prefix.
+    """
+    if entry.startswith("[HIGH] "):
+        return "high", entry[7:]
+    m = re.match(r'^\[EPHEMERAL expires=(\d{4}-\d{2}-\d{2})\] ', entry)
+    if m:
+        return "ephemeral", entry[m.end():]
+    return "normal", entry
+
+
+def _is_expired(entry: str) -> bool:
+    """Return True if entry is ephemeral and its expiry date has passed."""
+    m = re.match(r'^\[EPHEMERAL expires=(\d{4}-\d{2}-\d{2})\] ', entry)
+    if not m:
+        return False
+    try:
+        expiry = date.fromisoformat(m.group(1))
+    except ValueError:
+        return False
+    return _today() > expiry
+
+
+def _sort_entries_by_priority(entries: List[str]) -> List[str]:
+    """Sort entries so [HIGH] comes first, then normal, then ephemeral."""
+    high = [e for e in entries if e.startswith("[HIGH] ")]
+    normal = [e for e in entries if not e.startswith("[HIGH] ") and not re.match(r'^\[EPHEMERAL', e)]
+    ephemeral = [e for e in entries if re.match(r'^\[EPHEMERAL', e)]
+    return high + normal + ephemeral
+
+
+# ---------------------------------------------------------------------------
+# Contradiction / overlap detection
+# ---------------------------------------------------------------------------
+
+def _tokenize(text: str) -> frozenset:
+    """Lowercase words minus stopwords and punctuation."""
+    text = text.lower().translate(str.maketrans("", "", string.punctuation))
+    return frozenset(w for w in text.split() if w and w not in _STOPWORDS)
+
+
+def _detect_overlap(new_content: str, existing_entries: List[str]) -> List[str]:
+    """
+    Return list of existing entries that have >40% token overlap with new_content.
+
+    Overlap = |intersection| / max(len(new_tokens), 1).
+    Entries that are exact duplicates are excluded (handled by dedup elsewhere).
+    """
+    new_tokens = _tokenize(new_content)
+    if not new_tokens:
+        return []
+
+    overlapping = []
+    for entry in existing_entries:
+        if entry == new_content:
+            continue  # exact dup handled separately
+        _, bare = _parse_entry_priority(entry)
+        entry_tokens = _tokenize(bare)
+        overlap = len(new_tokens & entry_tokens) / max(len(new_tokens), 1)
+        if overlap > 0.4:
+            overlapping.append(entry)
+    return overlapping
+
+
 class MemoryStore:
     """
     Bounded curated memory with file persistence. One instance per AIAgent.
 
     Maintains two parallel states:
-      - _system_prompt_snapshot: frozen at load time, used for system prompt injection.
-        Never mutated mid-session. Keeps prefix cache stable.
+      - _system_prompt_snapshot: frozen at load time, used for the *base* of
+        system prompt injection. Never mutated mid-session. Keeps prefix cache stable.
+      - _session_additions: entries added *during this session* — appended to the
+        system prompt output so the LLM can see them immediately.
       - memory_entries / user_entries: live state, mutated by tool calls, persisted to disk.
         Tool responses always reflect this live state.
     """
@@ -113,8 +223,10 @@ class MemoryStore:
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
-        # Frozen snapshot for system prompt -- set once at load_from_disk()
+        # Frozen base snapshot for system prompt — set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
+        # Entries added during the current session (not in the frozen snapshot)
+        self._session_additions: Dict[str, List[str]] = {"memory": [], "user": []}
 
     def load_from_disk(self):
         """Load entries from MEMORY.md and USER.md, capture system prompt snapshot."""
@@ -123,6 +235,14 @@ class MemoryStore:
 
         self.memory_entries = self._read_file(mem_dir / "MEMORY.md")
         self.user_entries = self._read_file(mem_dir / "USER.md")
+
+        # Drop expired ephemeral entries on load; persist if any were removed
+        for target in ("memory", "user"):
+            entries = self._entries_for(target)
+            filtered = [e for e in entries if not _is_expired(e)]
+            if len(filtered) < len(entries):
+                self._set_entries(target, filtered)
+                self.save_to_disk(target)
 
         # Deduplicate entries (preserves order, keeps first occurrence)
         self.memory_entries = list(dict.fromkeys(self.memory_entries))
@@ -133,6 +253,8 @@ class MemoryStore:
             "memory": self._render_block("memory", self.memory_entries),
             "user": self._render_block("user", self.user_entries),
         }
+        # Clear per-session additions on any reload
+        self._session_additions = {"memory": [], "user": []}
 
     @staticmethod
     @contextmanager
@@ -141,7 +263,15 @@ class MemoryStore:
 
         Uses a separate .lock file so the memory file itself can still be
         atomically replaced via os.replace().
+
+        On Windows (fcntl unavailable), falls back to a no-op context manager —
+        acceptable because Hermes officially requires Unix (WSL2 on Windows).
         """
+        if fcntl is None:
+            # No-op on Windows — Hermes is not officially supported there
+            yield
+            return
+
         lock_path = path.with_suffix(path.suffix + ".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = open(lock_path, "w")
@@ -163,9 +293,11 @@ class MemoryStore:
         """Re-read entries from disk into in-memory state.
 
         Called under file lock to get the latest state before mutating.
+        Also drops expired ephemeral entries on reload.
         """
         fresh = self._read_file(self._path_for(target))
         fresh = list(dict.fromkeys(fresh))  # deduplicate
+        fresh = [e for e in fresh if not _is_expired(e)]
         self._set_entries(target, fresh)
 
     def save_to_disk(self, target: str):
@@ -195,13 +327,40 @@ class MemoryStore:
             return self.user_char_limit
         return self.memory_char_limit
 
-    def add(self, target: str, content: str) -> Dict[str, Any]:
-        """Append a new entry. Returns error if it would exceed the char limit."""
+    def add(
+        self,
+        target: str,
+        content: str,
+        priority: str = "normal",
+        expires_days: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Append a new entry. Returns error if it would exceed the char limit.
+
+        priority: "high", "normal" (default), or "ephemeral".
+        expires_days: only used when priority="ephemeral". Defaults to 30.
+        """
         content = content.strip()
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
 
-        # Scan for injection/exfiltration before accepting
+        if priority not in VALID_PRIORITIES:
+            return {
+                "success": False,
+                "error": f"Invalid priority '{priority}'. Use: {', '.join(VALID_PRIORITIES)}.",
+            }
+
+        # Build the stored entry with prefix
+        if priority == "high":
+            stored_entry = f"[HIGH] {content}"
+        elif priority == "ephemeral":
+            days = expires_days if expires_days is not None else _DEFAULT_EPHEMERAL_DAYS
+            expires = _today() + timedelta(days=days)
+            stored_entry = f"{_make_ephemeral_prefix(expires)} {content}"
+        else:
+            stored_entry = content
+
+        # Scan for injection/exfiltration before accepting (scan bare content)
         scan_error = _scan_memory_content(content)
         if scan_error:
             return {"success": False, "error": scan_error}
@@ -214,31 +373,71 @@ class MemoryStore:
             limit = self._char_limit(target)
 
             # Reject exact duplicates
-            if content in entries:
+            if stored_entry in entries:
                 return self._success_response(target, "Entry already exists (no duplicate added).")
 
-            # Calculate what the new total would be
-            new_entries = entries + [content]
+            # Contradiction detection — warn but don't block
+            overlapping = _detect_overlap(content, entries)
+
+            # Attempt to fit within limit; evict ephemeral then normal if needed
+            new_entries = entries + [stored_entry]
             new_total = len(ENTRY_DELIMITER.join(new_entries))
 
             if new_total > limit:
-                current = self._char_count(target)
+                # Try evicting ephemeral entries first
+                evictable = [e for e in entries if re.match(r'^\[EPHEMERAL', e)]
+                if evictable:
+                    for evict in evictable:
+                        entries.remove(evict)
+                        new_entries = entries + [stored_entry]
+                        new_total = len(ENTRY_DELIMITER.join(new_entries))
+                        if new_total <= limit:
+                            break
+
+            if new_total > limit:
+                # Try evicting oldest normal entries
+                normal_entries = [
+                    e for e in entries
+                    if not e.startswith("[HIGH] ") and not re.match(r'^\[EPHEMERAL', e)
+                ]
+                for evict in normal_entries:
+                    entries.remove(evict)
+                    new_entries = entries + [stored_entry]
+                    new_total = len(ENTRY_DELIMITER.join(new_entries))
+                    if new_total <= limit:
+                        break
+
+            if new_total > limit:
+                current = len(ENTRY_DELIMITER.join(entries))
                 return {
                     "success": False,
                     "error": (
                         f"Memory at {current:,}/{limit:,} chars. "
-                        f"Adding this entry ({len(content)} chars) would exceed the limit. "
-                        f"Replace or remove existing entries first."
+                        f"Adding this entry ({len(stored_entry)} chars) would exceed the limit "
+                        f"even after evicting ephemeral and normal entries. "
+                        f"Consolidate or remove existing high-priority entries first."
                     ),
                     "current_entries": entries,
                     "usage": f"{current:,}/{limit:,}",
                 }
 
-            entries.append(content)
+            entries.append(stored_entry)
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
-        return self._success_response(target, "Entry added.")
+        # Track this addition for intra-session visibility
+        self._session_additions[target].append(stored_entry)
+
+        result = self._success_response(target, "Entry added.")
+        if overlapping:
+            previews = [e[:80] + ("..." if len(e) > 80 else "") for e in overlapping]
+            result["warning"] = (
+                f"This may overlap with {len(overlapping)} existing "
+                f"entr{'y' if len(overlapping) == 1 else 'ies'}: "
+                + "; ".join(f"'{p}'" for p in previews)
+                + " — consider editing or removing the old one."
+            )
+        return result
 
     def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
         """Find entry containing old_text substring, replace it with new_content."""
@@ -334,16 +533,35 @@ class MemoryStore:
 
     def format_for_system_prompt(self, target: str) -> Optional[str]:
         """
-        Return the frozen snapshot for system prompt injection.
+        Return memory content for system prompt injection.
 
-        This returns the state captured at load_from_disk() time, NOT the live
-        state. Mid-session writes do not affect this. This keeps the system
-        prompt stable across all turns, preserving the prefix cache.
+        Returns the frozen base snapshot (captured at load_from_disk() time) plus
+        any entries added during the current session in a separate block.
 
-        Returns None if the snapshot is empty (no entries at load time).
+        The base snapshot is frozen to preserve the Anthropic prefix cache —
+        its content is stable across turns until the next session start.
+        Session additions cause one cache miss each but re-stabilize immediately
+        after.
+
+        Returns None if there is no content to show.
         """
-        block = self._system_prompt_snapshot.get(target, "")
-        return block if block else None
+        base = self._system_prompt_snapshot.get(target, "")
+        additions = self._session_additions.get(target, [])
+
+        if not base and not additions:
+            return None
+
+        if not additions:
+            return base if base else None
+
+        # Render the additions block
+        sorted_additions = _sort_entries_by_priority(additions)
+        additions_text = ENTRY_DELIMITER.join(sorted_additions)
+        additions_block = f"## Added this session\n{additions_text}"
+
+        if base:
+            return f"{base}\n\n{additions_block}"
+        return additions_block
 
     # -- Internal helpers --
 
@@ -369,8 +587,11 @@ class MemoryStore:
         if not entries:
             return ""
 
+        # Sort by priority for display
+        sorted_entries = _sort_entries_by_priority(entries)
+
         limit = self._char_limit(target)
-        content = ENTRY_DELIMITER.join(entries)
+        content = ENTRY_DELIMITER.join(sorted_entries)
         current = len(content)
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
 
@@ -441,6 +662,8 @@ def memory_tool(
     target: str = "memory",
     content: str = None,
     old_text: str = None,
+    priority: str = "normal",
+    expires_days: Optional[int] = None,
     store: Optional[MemoryStore] = None,
 ) -> str:
     """
@@ -457,7 +680,7 @@ def memory_tool(
     if action == "add":
         if not content:
             return tool_error("Content is required for 'add' action.", success=False)
-        result = store.add(target, content)
+        result = store.add(target, content, priority=priority, expires_days=expires_days)
 
     elif action == "replace":
         if not old_text:
@@ -509,6 +732,10 @@ MEMORY_SCHEMA = {
         "- 'memory': your notes -- environment facts, project conventions, tool quirks, lessons learned\n\n"
         "ACTIONS: add (new entry), replace (update existing -- old_text identifies it), "
         "remove (delete -- old_text identifies it).\n\n"
+        "PRIORITY TIERS (optional, default 'normal'):\n"
+        "- 'high': critical facts; sorted first in prompt, never auto-evicted on overflow.\n"
+        "- 'normal': standard entries (default).\n"
+        "- 'ephemeral': time-limited entries; auto-expire after expires_days (default 30).\n\n"
         "SKIP: trivial/obvious info, things easily re-discovered, raw data dumps, and temporary task state."
     ),
     "parameters": {
@@ -532,6 +759,22 @@ MEMORY_SCHEMA = {
                 "type": "string",
                 "description": "Short unique substring identifying the entry to replace or remove."
             },
+            "priority": {
+                "type": "string",
+                "enum": ["high", "normal", "ephemeral"],
+                "description": (
+                    "Entry importance tier (default: 'normal'). "
+                    "'high' entries are never auto-evicted and sort first. "
+                    "'ephemeral' entries expire after expires_days days."
+                )
+            },
+            "expires_days": {
+                "type": "integer",
+                "description": (
+                    "Days until an 'ephemeral' entry expires (default: 30). "
+                    "Only used when priority='ephemeral'."
+                )
+            },
         },
         "required": ["action", "target"],
     },
@@ -550,11 +793,9 @@ registry.register(
         target=args.get("target", "memory"),
         content=args.get("content"),
         old_text=args.get("old_text"),
+        priority=args.get("priority", "normal"),
+        expires_days=args.get("expires_days"),
         store=kw.get("store")),
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
-
-
-

@@ -4873,6 +4873,10 @@ For more help on a command:
     skills_uninstall = skills_subparsers.add_parser("uninstall", help="Remove a hub-installed skill")
     skills_uninstall.add_argument("name", help="Skill name to remove")
 
+    skills_rollback = skills_subparsers.add_parser("rollback", help="Restore a skill to its previous version from SKILL_HISTORY.md")
+    skills_rollback.add_argument("name", help="Skill name to roll back")
+    skills_rollback.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+
     skills_publish = skills_subparsers.add_parser("publish", help="Publish a skill to a registry")
     skills_publish.add_argument("skill_path", help="Path to skill directory")
     skills_publish.add_argument("--to", default="github", choices=["github", "clawhub"], help="Target registry")

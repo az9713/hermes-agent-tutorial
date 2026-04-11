@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from hermes_constants import get_hermes_home
 from typing import Dict, Any, Optional, Tuple
@@ -287,6 +288,43 @@ def _atomic_write_text(file_path: Path, content: str, encoding: str = "utf-8") -
 
 
 # =============================================================================
+# Skill history helpers
+# =============================================================================
+
+SKILL_HISTORY_FILE = "SKILL_HISTORY.md"
+
+
+def _append_skill_history(
+    skill_dir: Path,
+    action: str,
+    reason: str,
+    file_path: str,
+    old_text: str,
+    new_text: str,
+) -> None:
+    """
+    Append a history record to SKILL_HISTORY.md inside skill_dir.
+
+    Each record contains: timestamp, action, reason, file path, old block, new block.
+    The file is append-only so history is never lost, and rollback entries are
+    themselves recorded (making rollback reversible).
+
+    Uses _atomic_write_text to avoid partial writes.
+    """
+    history_path = skill_dir / SKILL_HISTORY_FILE
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    record = (
+        f"\n## {now} — {action}\n"
+        f"**Reason:** {reason or '(no reason given)'}\n"
+        f"**File:** {file_path}\n"
+        f"\n### Old\n```text\n{old_text}\n```\n"
+        f"\n### New\n```text\n{new_text}\n```\n"
+    )
+    existing = history_path.read_text(encoding="utf-8") if history_path.exists() else ""
+    _atomic_write_text(history_path, existing + record)
+
+
+# =============================================================================
 # Core actions
 # =============================================================================
 
@@ -347,7 +385,7 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
     return result
 
 
-def _edit_skill(name: str, content: str) -> Dict[str, Any]:
+def _edit_skill(name: str, content: str, reason: str = None) -> Dict[str, Any]:
     """Replace the SKILL.md of any existing skill (full rewrite)."""
     err = _validate_frontmatter(content)
     if err:
@@ -373,6 +411,16 @@ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
             _atomic_write_text(skill_md, original_content)
         return {"success": False, "error": scan_error}
 
+    # Record history after successful scan
+    _append_skill_history(
+        skill_dir=existing["path"],
+        action="edit",
+        reason=reason or "(no reason given)",
+        file_path="SKILL.md",
+        old_text=original_content or "",
+        new_text=content,
+    )
+
     return {
         "success": True,
         "message": f"Skill '{name}' updated.",
@@ -386,6 +434,7 @@ def _patch_skill(
     new_string: str,
     file_path: str = None,
     replace_all: bool = False,
+    reason: str = None,
 ) -> Dict[str, Any]:
     """Targeted find-and-replace within a skill file.
 
@@ -461,6 +510,17 @@ def _patch_skill(
     if scan_error:
         _atomic_write_text(target, original_content)
         return {"success": False, "error": scan_error}
+
+    # Record history after successful scan
+    target_label = "SKILL.md" if not file_path else file_path
+    _append_skill_history(
+        skill_dir=skill_dir,
+        action="patch",
+        reason=reason or "(no reason given)",
+        file_path=target_label,
+        old_text=old_string,
+        new_text=new_string,
+    )
 
     return {
         "success": True,
@@ -596,6 +656,7 @@ def skill_manage(
     old_string: str = None,
     new_string: str = None,
     replace_all: bool = False,
+    reason: str = None,
 ) -> str:
     """
     Manage user-created skills. Dispatches to the appropriate action handler.
@@ -610,14 +671,18 @@ def skill_manage(
     elif action == "edit":
         if not content:
             return tool_error("content is required for 'edit'. Provide the full updated SKILL.md text.", success=False)
-        result = _edit_skill(name, content)
+        if not reason or not reason.strip():
+            return tool_error("'reason' is required when editing a skill — explain why in one sentence.", success=False)
+        result = _edit_skill(name, content, reason=reason)
 
     elif action == "patch":
         if not old_string:
             return tool_error("old_string is required for 'patch'. Provide the text to find.", success=False)
         if new_string is None:
             return tool_error("new_string is required for 'patch'. Use empty string to delete matched text.", success=False)
-        result = _patch_skill(name, old_string, new_string, file_path, replace_all)
+        if not reason or not reason.strip():
+            return tool_error("'reason' is required when patching a skill — explain why in one sentence.", success=False)
+        result = _patch_skill(name, old_string, new_string, file_path, replace_all, reason=reason)
 
     elif action == "delete":
         result = _delete_skill(name)
@@ -735,6 +800,13 @@ SKILL_MANAGE_SCHEMA = {
                 "type": "string",
                 "description": "Content for the file. Required for 'write_file'."
             },
+            "reason": {
+                "type": "string",
+                "description": (
+                    "Required for 'patch' and 'edit': one sentence explaining why the skill "
+                    "is being modified. Logged to SKILL_HISTORY.md for audit trail and rollback."
+                )
+            },
         },
         "required": ["action", "name"],
     },
@@ -757,6 +829,7 @@ registry.register(
         file_content=args.get("file_content"),
         old_string=args.get("old_string"),
         new_string=args.get("new_string"),
-        replace_all=args.get("replace_all", False)),
+        replace_all=args.get("replace_all", False),
+        reason=args.get("reason")),
     emoji="📝",
 )

@@ -20,10 +20,12 @@ from tools.skill_manager_tool import (
     _delete_skill,
     _write_file,
     _remove_file,
+    _append_skill_history,
     skill_manage,
     VALID_NAME_RE,
     ALLOWED_SUBDIRS,
     MAX_NAME_LENGTH,
+    SKILL_HISTORY_FILE,
 )
 
 
@@ -480,6 +482,160 @@ class TestSkillManageDispatcher:
         assert result["success"] is False
 
     def test_full_create_via_dispatcher(self, tmp_path):
+        with _skill_dir(tmp_path):
+            raw = skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+        result = json.loads(raw)
+        assert result["success"] is True
+
+
+# =========================================================================
+# Skill patch history (Change 2)
+# =========================================================================
+
+class TestSkillPatchHistory:
+    def test_patch_writes_history_file(self, tmp_path):
+        """After a successful patch, SKILL_HISTORY.md is created."""
+        with _skill_dir(tmp_path):
+            _create_skill("hist-skill", VALID_SKILL_CONTENT)
+            _patch_skill("hist-skill", "Do the thing", "Do the NEW thing", reason="testing history")
+            existing = _find_skill("hist-skill")
+            history_path = existing["path"] / SKILL_HISTORY_FILE
+            assert history_path.exists(), "SKILL_HISTORY.md was not created"
+
+    def test_history_contains_old_and_new_blocks(self, tmp_path):
+        """History record includes both old and new text."""
+        with _skill_dir(tmp_path):
+            _create_skill("hist-skill", VALID_SKILL_CONTENT)
+            _patch_skill("hist-skill", "Do the thing", "Do the NEW thing", reason="improve step")
+            existing = _find_skill("hist-skill")
+            history = (existing["path"] / SKILL_HISTORY_FILE).read_text(encoding="utf-8")
+            assert "Do the thing" in history
+            assert "Do the NEW thing" in history
+
+    def test_history_contains_reason(self, tmp_path):
+        """Patch reason is recorded in the history."""
+        with _skill_dir(tmp_path):
+            _create_skill("hist-skill", VALID_SKILL_CONTENT)
+            _patch_skill("hist-skill", "Do the thing", "Do the NEW thing", reason="fix step wording")
+            existing = _find_skill("hist-skill")
+            history = (existing["path"] / SKILL_HISTORY_FILE).read_text(encoding="utf-8")
+            assert "fix step wording" in history
+
+    def test_history_is_append_only(self, tmp_path):
+        """Multiple patches each append a new record."""
+        with _skill_dir(tmp_path):
+            _create_skill("hist-skill", VALID_SKILL_CONTENT)
+            _patch_skill("hist-skill", "Do the thing", "Step A", reason="first patch")
+            _patch_skill("hist-skill", "Step A", "Step B", reason="second patch")
+            existing = _find_skill("hist-skill")
+            history = (existing["path"] / SKILL_HISTORY_FILE).read_text(encoding="utf-8")
+            assert history.count("## 20") >= 2  # at least two timestamped records
+
+    def test_edit_writes_history(self, tmp_path):
+        """Full SKILL.md rewrite via _edit_skill also records history."""
+        with _skill_dir(tmp_path):
+            _create_skill("edit-skill", VALID_SKILL_CONTENT)
+            _edit_skill("edit-skill", VALID_SKILL_CONTENT_2, reason="major overhaul")
+            existing = _find_skill("edit-skill")
+            history_path = existing["path"] / SKILL_HISTORY_FILE
+            assert history_path.exists()
+            history = history_path.read_text(encoding="utf-8")
+            assert "major overhaul" in history
+            assert "edit" in history
+
+    def test_append_skill_history_helper(self, tmp_path):
+        """_append_skill_history creates and appends correctly."""
+        _append_skill_history(
+            skill_dir=tmp_path,
+            action="patch",
+            reason="test reason",
+            file_path="SKILL.md",
+            old_text="old content",
+            new_text="new content",
+        )
+        history_path = tmp_path / SKILL_HISTORY_FILE
+        assert history_path.exists()
+        text = history_path.read_text()
+        assert "test reason" in text
+        assert "old content" in text
+        assert "new content" in text
+
+        # Second call appends
+        _append_skill_history(
+            skill_dir=tmp_path,
+            action="rollback",
+            reason="undo",
+            file_path="SKILL.md",
+            old_text="new content",
+            new_text="old content",
+        )
+        text2 = history_path.read_text()
+        assert text2.count("## 20") == 2  # two records
+
+
+# =========================================================================
+# Reason enforcement (Change 3)
+# =========================================================================
+
+class TestReasonRequired:
+    def test_patch_without_reason_returns_error(self, tmp_path):
+        """skill_manage patch without reason returns an error."""
+        with _skill_dir(tmp_path):
+            skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+            raw = skill_manage(
+                action="patch",
+                name="test-skill",
+                old_string="Do the thing",
+                new_string="Do the NEW thing",
+                # no reason
+            )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "reason" in result["error"].lower()
+
+    def test_edit_without_reason_returns_error(self, tmp_path):
+        """skill_manage edit without reason returns an error."""
+        with _skill_dir(tmp_path):
+            skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+            raw = skill_manage(
+                action="edit",
+                name="test-skill",
+                content=VALID_SKILL_CONTENT_2,
+                # no reason
+            )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "reason" in result["error"].lower()
+
+    def test_patch_with_reason_succeeds(self, tmp_path):
+        """skill_manage patch with reason succeeds."""
+        with _skill_dir(tmp_path):
+            skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+            raw = skill_manage(
+                action="patch",
+                name="test-skill",
+                old_string="Do the thing",
+                new_string="Do the NEW thing",
+                reason="improving step description",
+            )
+        result = json.loads(raw)
+        assert result["success"] is True
+
+    def test_edit_with_reason_succeeds(self, tmp_path):
+        """skill_manage edit with reason succeeds."""
+        with _skill_dir(tmp_path):
+            skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+            raw = skill_manage(
+                action="edit",
+                name="test-skill",
+                content=VALID_SKILL_CONTENT_2,
+                reason="major overhaul for new workflow",
+            )
+        result = json.loads(raw)
+        assert result["success"] is True
+
+    def test_create_does_not_require_reason(self, tmp_path):
+        """Create action does not require a reason (only patch/edit do)."""
         with _skill_dir(tmp_path):
             raw = skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
         result = json.loads(raw)
