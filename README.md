@@ -2,6 +2,8 @@
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
+> **Tutorial fork** — This is a clone of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), enhanced with a comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md). The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
+
 # Hermes Agent ☤
 
 <p align="center">
