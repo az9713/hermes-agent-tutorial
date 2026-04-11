@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
-> **Tutorial fork** — This is a clone of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), enhanced with a comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md). The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
+> **Tutorial fork** — This is a clone of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), enhanced with a comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md) and an original deep-dive analysis of Hermes Agent's self-improvement architecture. The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
 
 # Hermes Agent ☤
 
@@ -86,9 +86,66 @@ For the full command lists, see the [CLI guide](https://hermes-agent.nousresearc
 
 ---
 
+## What's in This Fork
+
+This repository adds two things on top of the original Hermes Agent codebase:
+
+### 1. Comprehensive Documentation (`docs/`)
+
+A full documentation set written from scratch — concepts, guides, references, and architecture decision records. Start at [`docs/index.md`](docs/index.md) for the navigation hub.
+
+| Section | File | What's Covered |
+|---------|------|---------------|
+| **Overview** | [`docs/overview/what-is-this.md`](docs/overview/what-is-this.md) | What Hermes is, mental model, architecture overview |
+| | [`docs/overview/key-concepts.md`](docs/overview/key-concepts.md) | Glossary of every important term (40+ entries) |
+| **Getting Started** | [`docs/getting-started/prerequisites.md`](docs/getting-started/prerequisites.md) | Exact dependencies with verify commands |
+| | [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md) | Install → first conversation in under 15 minutes |
+| | [`docs/getting-started/onboarding.md`](docs/getting-started/onboarding.md) | Zero-to-hero walkthrough for newcomers |
+| **Concepts** | [`docs/concepts/agent-loop.md`](docs/concepts/agent-loop.md) | The conversation loop, tool dispatch, context management |
+| | [`docs/concepts/tool-system.md`](docs/concepts/tool-system.md) | All 20 tools, toolsets, self-registration pattern |
+| | [`docs/concepts/skill-system.md`](docs/concepts/skill-system.md) | Skills as procedural memory, skill lifecycle, slash commands |
+| | [`docs/concepts/gateway.md`](docs/concepts/gateway.md) | 17-platform messaging gateway architecture |
+| | [`docs/concepts/memory-and-learning.md`](docs/concepts/memory-and-learning.md) | Memory layers, Honcho, session search, the learning loop |
+| | [`docs/concepts/terminal-execution.md`](docs/concepts/terminal-execution.md) | All 6 terminal backends (local, Docker, SSH, Modal, …) |
+| | [`docs/concepts/session-persistence.md`](docs/concepts/session-persistence.md) | SQLite+FTS5 storage, trajectory logs, RL training |
+| **Guides** | [`docs/guides/add-a-tool.md`](docs/guides/add-a-tool.md) | Build and register a new tool end-to-end |
+| | [`docs/guides/add-a-skill.md`](docs/guides/add-a-skill.md) | Write, test, and contribute a skill |
+| | [`docs/guides/add-a-platform.md`](docs/guides/add-a-platform.md) | Implement a new messaging platform adapter |
+| | [`docs/guides/configure-memory.md`](docs/guides/configure-memory.md) | Default setup, Honcho, Mem0, tuning nudges |
+| | [`docs/guides/deploy-with-docker.md`](docs/guides/deploy-with-docker.md) | Docker and Docker Compose deployment |
+| | [`docs/guides/use-cron-scheduling.md`](docs/guides/use-cron-scheduling.md) | Create, list, and manage cron automations |
+| **Reference** | [`docs/reference/configuration.md`](docs/reference/configuration.md) | Every `config.yaml` field with types and defaults |
+| | [`docs/reference/env-vars.md`](docs/reference/env-vars.md) | All 60+ environment variables by subsystem |
+| | [`docs/reference/cli-commands.md`](docs/reference/cli-commands.md) | All `hermes` commands, slash commands, keyboard shortcuts |
+| | [`docs/reference/tools.md`](docs/reference/tools.md) | Complete tool parameter reference |
+| **Architecture** | [`docs/architecture/system-design.md`](docs/architecture/system-design.md) | Full system diagram, component breakdown, data flows |
+| | [`docs/architecture/adr/001-tool-self-registration.md`](docs/architecture/adr/001-tool-self-registration.md) | ADR: why tools self-register at import time |
+| | [`docs/architecture/adr/002-openai-compatible-api.md`](docs/architecture/adr/002-openai-compatible-api.md) | ADR: why OpenAI SDK as universal provider layer |
+| | [`docs/architecture/adr/003-sqlite-fts-session-storage.md`](docs/architecture/adr/003-sqlite-fts-session-storage.md) | ADR: why SQLite+FTS5 over JSON files or Postgres |
+| | [`docs/architecture/adr/004-ephemeral-system-prompts.md`](docs/architecture/adr/004-ephemeral-system-prompts.md) | ADR: why system prompts are rebuilt every turn |
+| **Troubleshooting** | [`docs/troubleshooting/common-issues.md`](docs/troubleshooting/common-issues.md) | Top issues with exact fixes |
+
+### 2. Self-Improvement Deep-Dive Analysis (`docs/analysis/`)
+
+The README claims Hermes is "the only agent with a built-in learning loop." This fork includes an original code-level analysis of every self-improvement claim — what the implementing code actually does, where it falls short, and how to take it further.
+
+**[→ Read the full analysis: `docs/analysis/self-improvement-deep-dive.md`](docs/analysis/self-improvement-deep-dive.md)**
+
+| Claim | What the Code Actually Does | Key Gap |
+|-------|-----------------------------|---------|
+| Creates skills from experience | LLM calls `skill_manage` tool when `SKILLS_GUIDANCE` prompt triggers | No success signal — skills are created from complex tasks, not successful ones |
+| Improves skills during use | LLM calls `skill_manage(action="patch")` mid-conversation | No patch history; improvements take effect next session, not "during use" |
+| Nudges itself | `MEMORY_GUIDANCE` string injected in every system prompt | A prompt is not a nudge — it's a constant instruction with no scheduling |
+| Searches past conversations | FTS5 keyword search + Gemini Flash summarization | Reactive only; no proactive injection; keyword search misses semantic matches |
+| Builds a deepening user model | Freeform `USER.md` (1375 char limit); Honcho is opt-in | A text file is not a model; the real modeling (Honcho) is disabled by default |
+
+The analysis includes concrete improvement suggestions for each claim — from patch versioning and rollback, to background consolidation jobs, to semantic search and structured user model schemas.
+
+---
+
 ## Documentation
 
-All documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**:
+All upstream documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**:
 
 | Section | What's Covered |
 |---------|---------------|
