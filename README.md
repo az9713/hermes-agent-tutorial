@@ -2,7 +2,12 @@
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
 
-> **Tutorial fork** — This is a clone of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), enhanced with a comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md) and an original deep-dive analysis of Hermes Agent's self-improvement architecture. The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
+> **Tutorial fork** — This is a clone of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), enhanced with:
+> - A comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md)
+> - An original deep-dive analysis of Hermes Agent's self-improvement architecture ([`docs/analysis/`](docs/analysis/self-improvement-deep-dive.md))
+> - Working implementations of 7 self-improvement enhancements from that analysis — including `hermes skills rollback`, `hermes skills history`, patch audit trails, memory expiry edge-case fixes, and 179 automated tests ([`docs/analysis/implementation-status.md`](docs/analysis/implementation-status.md))
+>
+> The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
 
 # Hermes Agent ☤
 
