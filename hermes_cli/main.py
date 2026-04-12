@@ -4877,6 +4877,10 @@ For more help on a command:
     skills_rollback.add_argument("name", help="Skill name to roll back")
     skills_rollback.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
 
+    skills_history = skills_subparsers.add_parser("history", help="Show the patch/edit/rollback log for a skill")
+    skills_history.add_argument("name", help="Skill name to show history for")
+    skills_history.add_argument("--detail", type=int, default=None, metavar="N", help="Show the diff for record #N")
+
     skills_publish = skills_subparsers.add_parser("publish", help="Publish a skill to a registry")
     skills_publish.add_argument("skill_path", help="Path to skill directory")
     skills_publish.add_argument("--to", default="github", choices=["github", "clawhub"], help="Target registry")

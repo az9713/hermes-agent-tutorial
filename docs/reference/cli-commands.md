@@ -61,6 +61,8 @@ Run from your shell (not inside a conversation):
 | `hermes skills uninstall <name>` | Remove an installed hub skill |
 | `hermes skills update` | Update all hub skills |
 | `hermes skills search <query>` | Search the Skills Hub |
+| `hermes skills rollback <name>` | Restore a skill to its state before the last patch or edit. Shows a diff preview and prompts for confirmation. Use `--yes` / `-y` to skip the prompt. |
+| `hermes skills history <name>` | Display the full patch/edit/rollback audit trail for a skill as a Rich table (`#`, `Timestamp`, `Action`, `Reason`, `File`). Use `--detail N` to see the diff for record #N. |
 
 ### hermes claw subcommands (OpenClaw migration)
 

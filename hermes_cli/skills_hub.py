@@ -697,6 +697,37 @@ def _parse_last_history_record(history_text: str):
     return None, None, None
 
 
+def _parse_all_history_records(history_text: str) -> list:
+    """
+    Parse ALL records from SKILL_HISTORY.md.
+
+    Returns a list of dicts (oldest first), each with keys:
+      timestamp, action, reason, file_path, old_text, new_text
+
+    Unlike _parse_last_history_record, this function includes rollback records
+    so the full audit trail is visible in the history table view.
+    """
+    sections = re.split(r'\n(?=## \d{4}-\d{2}-\d{2}T)', history_text)
+    records = []
+    for section in sections:
+        header = re.match(r'## (\S+) — (\w+)', section)
+        if not header:
+            continue
+        reason_m = re.search(r'\*\*Reason:\*\* (.+)', section)
+        file_m = re.search(r'\*\*File:\*\* (.+)', section)
+        old_m = re.search(r'### Old\n```text\n(.*?)\n```', section, re.DOTALL)
+        new_m = re.search(r'### New\n```text\n(.*?)\n```', section, re.DOTALL)
+        records.append({
+            "timestamp": header.group(1),
+            "action": header.group(2),
+            "reason": (reason_m.group(1).strip() if reason_m else ""),
+            "file_path": (file_m.group(1).strip() if file_m else ""),
+            "old_text": (old_m.group(1) if old_m else ""),
+            "new_text": (new_m.group(1) if new_m else ""),
+        })
+    return records
+
+
 def do_rollback(
     name: str,
     skip_confirm: bool = False,
@@ -793,6 +824,102 @@ def do_rollback(
         pass
 
     c.print(f"[bold green]Rolled back '{name}' ({file_path}) to previous version.[/]\n")
+
+
+def do_history(
+    name: str,
+    detail: Optional[int] = None,
+    console: Optional[Console] = None,
+) -> None:
+    """
+    Display the patch/edit/rollback log for a skill as a Rich table.
+
+    With --detail N, shows the full diff for record #N (1-indexed, oldest first).
+    Without --detail, shows a summary table of all records.
+    """
+    from tools.skill_manager_tool import _find_skill, SKILL_HISTORY_FILE
+
+    c = console or _console
+
+    existing = _find_skill(name)
+    if not existing:
+        c.print(f"[bold red]Error:[/] Skill '{name}' not found.\n")
+        return
+
+    skill_dir = existing["path"]
+    history_path = skill_dir / SKILL_HISTORY_FILE
+
+    if not history_path.exists():
+        c.print(f"[bold yellow]No history found for '{name}'.[/]\n")
+        return
+
+    history_text = history_path.read_text(encoding="utf-8")
+    records = _parse_all_history_records(history_text)
+
+    if not records:
+        c.print(f"[bold yellow]No parseable records in history for '{name}'.[/]\n")
+        return
+
+    # --detail N: show diff for a specific record (1-indexed)
+    if detail is not None:
+        if detail < 1 or detail > len(records):
+            c.print(
+                f"[bold red]Error:[/] Record #{detail} does not exist. "
+                f"Valid range: 1\u2013{len(records)}.\n"
+            )
+            return
+        rec = records[detail - 1]
+        c.print(f"\n[bold]Record #{detail} \u2014 {rec['action']}[/]")
+        c.print(f"[dim]Timestamp:[/] {rec['timestamp']}")
+        c.print(f"[dim]Reason:[/]    {rec['reason']}")
+        c.print(f"[dim]File:[/]      {rec['file_path']}\n")
+        diff_lines = list(difflib.unified_diff(
+            rec["old_text"].splitlines(keepends=True),
+            rec["new_text"].splitlines(keepends=True),
+            fromfile=f"{rec['file_path']} (old)",
+            tofile=f"{rec['file_path']} (new)",
+            lineterm="",
+        ))
+        if diff_lines:
+            for line in diff_lines[:60]:
+                if line.startswith("+"):
+                    c.print(f"[green]{line}[/]", end="")
+                elif line.startswith("-"):
+                    c.print(f"[red]{line}[/]", end="")
+                else:
+                    c.print(line, end="")
+            if len(diff_lines) > 60:
+                c.print(f"\n[dim]... and {len(diff_lines) - 60} more lines[/]")
+            c.print()
+        else:
+            c.print("[dim]No visible diff (old and new are identical).[/]\n")
+        return
+
+    # Default: summary table
+    table = Table(title=f"History for '{name}'")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Timestamp", style="cyan")
+    table.add_column("Action", style="bold")
+    table.add_column("Reason")
+    table.add_column("File", style="dim")
+
+    for i, rec in enumerate(records, 1):
+        action_style = {"rollback": "yellow", "patch": "green", "edit": "blue"}.get(
+            rec["action"], ""
+        )
+        table.add_row(
+            str(i),
+            rec["timestamp"],
+            f"[{action_style}]{rec['action']}[/]" if action_style else rec["action"],
+            rec["reason"][:60] + ("\u2026" if len(rec["reason"]) > 60 else ""),
+            rec["file_path"],
+        )
+
+    c.print(table)
+    c.print(
+        f"[dim]{len(records)} record(s). "
+        f"Use --detail N to see the diff for a specific record.[/]\n"
+    )
 
 
 def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> None:
@@ -1120,6 +1247,8 @@ def skills_command(args) -> None:
         do_uninstall(args.name)
     elif action == "rollback":
         do_rollback(args.name, skip_confirm=getattr(args, "yes", False))
+    elif action == "history":
+        do_history(args.name, detail=getattr(args, "detail", None))
     elif action == "publish":
         do_publish(
             args.skill_path,

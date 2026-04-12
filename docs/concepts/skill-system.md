@@ -125,6 +125,37 @@ After Hermes completes a complex or novel task, it sometimes creates a new skill
 
 Similarly, if an existing skill's instructions were ambiguous or led to a mistake, the agent may update the skill's `SKILL.md` to clarify the workflow. This is the self-improvement loop.
 
+### Patch history
+
+Every patch and edit is recorded in `SKILL_HISTORY.md` inside the skill directory. The file is append-only. Each record contains:
+
+- A timestamp and action type (`patch`, `edit`, or `rollback`)
+- The reason the change was made
+- The file that was changed
+- The old and new content as a fenced diff block
+
+`SKILL_HISTORY.md` is the authoritative audit trail for a skill's evolution. It accumulates across sessions and is never automatically pruned.
+
+### Inspecting and undoing changes
+
+Two CLI commands give users control over the self-improvement loop:
+
+**`hermes skills history <name>`** — displays the full audit trail as a Rich table sorted oldest-first. Every patch, edit, and rollback appears as a numbered row. Use `--detail N` to show the full diff for record #N:
+
+```bash
+hermes skills history my-skill          # summary table
+hermes skills history my-skill --detail 3  # diff for record 3
+```
+
+**`hermes skills rollback <name>`** — restores the skill to its state before the most recent patch or edit. Shows a diff preview before applying the change, then prompts for confirmation. The rollback itself is recorded as a new `rollback` entry in `SKILL_HISTORY.md`, keeping the log append-only:
+
+```bash
+hermes skills rollback my-skill         # preview and confirm
+hermes skills rollback my-skill --yes   # skip confirmation prompt
+```
+
+Rollbacks appear in `hermes skills history` output so the full sequence of changes — including any undone patches — is always visible.
+
 ## Interaction with other subsystems
 
 | Subsystem | Interaction |

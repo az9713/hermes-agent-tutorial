@@ -438,6 +438,103 @@ class TestPriorityHelpers:
 
 
 # =========================================================================
+# _today() monkeypatch — expiry edge cases
+# =========================================================================
+
+FIXED_TODAY = date(2026, 4, 15)
+
+
+@pytest.fixture
+def pin_today(monkeypatch):
+    """Pin tools.memory_tool._today to FIXED_TODAY for deterministic expiry tests."""
+    monkeypatch.setattr("tools.memory_tool._today", lambda: FIXED_TODAY)
+
+
+class TestExpiryEdgeCases:
+    """Deterministic boundary tests for _is_expired and load_from_disk expiry pruning.
+
+    All tests pin _today to 2026-04-15 so they are fully clock-independent.
+    The key design decision under test: _is_expired uses strict > (not >=),
+    meaning an entry whose expiry date is today is KEPT, not dropped.
+
+    Existing tests (test_is_expired_past_date, test_is_expired_future_date) use
+    date.today() directly and test "clearly past" / "clearly future". They do not
+    cover the exact boundary and are theoretically susceptible to a midnight race.
+    These tests are immune to both problems.
+    """
+
+    def test_entry_expiring_today_is_not_expired(self, pin_today):
+        # today == expiry: _today() > expiry is False → entry is KEPT.
+        # This pins the > (not >=) contract. If the operator were changed to >=,
+        # this test would fail, making the regression immediately visible.
+        entry = "[EPHEMERAL expires=2026-04-15] expiring today"
+        assert _is_expired(entry) is False
+
+    def test_entry_expiring_yesterday_is_expired(self, pin_today):
+        # today > expiry: _today() > expiry is True → entry is DROPPED.
+        # This is the "day after expiry" case — the first day the entry is gone.
+        entry = "[EPHEMERAL expires=2026-04-14] expired yesterday"
+        assert _is_expired(entry) is True
+
+    def test_entry_expiring_tomorrow_is_not_expired(self, pin_today):
+        # today < expiry: still in the future → entry is KEPT.
+        # Equivalent to existing test_is_expired_future_date but clock-independent.
+        entry = "[EPHEMERAL expires=2026-04-16] expires tomorrow"
+        assert _is_expired(entry) is False
+
+    def test_load_from_disk_drops_exactly_expired_entries(self, pin_today, tmp_path, monkeypatch):
+        """load_from_disk() prunes yesterday but keeps today and tomorrow."""
+        monkeypatch.setattr("tools.memory_tool.MEMORY_DIR", tmp_path)
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+
+        mem_file = tmp_path / "MEMORY.md"
+        entries = [
+            "[EPHEMERAL expires=2026-04-14] yesterday",  # dropped
+            "[EPHEMERAL expires=2026-04-15] today",      # kept
+            "[EPHEMERAL expires=2026-04-16] tomorrow",   # kept
+        ]
+        mem_file.write_text(ENTRY_DELIMITER.join(entries), encoding="utf-8")
+
+        s = MemoryStore(memory_char_limit=2200, user_char_limit=1375)
+        s.load_from_disk()
+
+        surviving = s.memory_entries
+        assert len(surviving) == 2
+        assert any("today" in e for e in surviving)
+        assert any("tomorrow" in e for e in surviving)
+        assert not any("yesterday" in e for e in surviving)
+
+        # Expired entry must also be absent from the re-written file on disk.
+        on_disk = mem_file.read_text(encoding="utf-8")
+        assert "yesterday" not in on_disk
+        assert "today" in on_disk
+        assert "tomorrow" in on_disk
+
+    def test_reload_target_drops_exactly_expired_entries(self, pin_today, tmp_path, monkeypatch):
+        """_reload_target() (called by add()) also prunes expired entries."""
+        monkeypatch.setattr("tools.memory_tool.MEMORY_DIR", tmp_path)
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+
+        mem_file = tmp_path / "MEMORY.md"
+        entries = [
+            "[EPHEMERAL expires=2026-04-14] yesterday",  # dropped
+            "[EPHEMERAL expires=2026-04-15] today",      # kept
+        ]
+        mem_file.write_text(ENTRY_DELIMITER.join(entries), encoding="utf-8")
+
+        s = MemoryStore(memory_char_limit=2200, user_char_limit=1375)
+        s.load_from_disk()
+
+        # Add a new entry — this triggers _reload_target("memory") before writing.
+        s.add("memory", "a new normal entry")
+
+        surviving = s.memory_entries
+        assert not any("yesterday" in e for e in surviving)
+        assert any("today" in e for e in surviving)
+        assert any("a new normal entry" in e for e in surviving)
+
+
+# =========================================================================
 # memory_tool() dispatcher
 # =========================================================================
 

@@ -134,12 +134,24 @@ The README claims Hermes is "the only agent with a built-in learning loop." This
 | Claim | What the Code Actually Does | Key Gap |
 |-------|-----------------------------|---------|
 | Creates skills from experience | LLM calls `skill_manage` tool when `SKILLS_GUIDANCE` prompt triggers | No success signal — skills are created from complex tasks, not successful ones |
-| Improves skills during use | LLM calls `skill_manage(action="patch")` mid-conversation | No patch history; improvements take effect next session, not "during use" |
+| Improves skills during use | LLM calls `skill_manage(action="patch")` mid-conversation | ✅ Patch history now recorded in `SKILL_HISTORY.md`; `hermes skills rollback` and `hermes skills history` implemented |
 | Nudges itself | `MEMORY_GUIDANCE` string injected in every system prompt | A prompt is not a nudge — it's a constant instruction with no scheduling |
 | Searches past conversations | FTS5 keyword search + Gemini Flash summarization | Reactive only; no proactive injection; keyword search misses semantic matches |
 | Builds a deepening user model | Freeform `USER.md` (1375 char limit); Honcho is opt-in | A text file is not a model; the real modeling (Honcho) is disabled by default |
 
 The analysis includes concrete improvement suggestions for each claim — from patch versioning and rollback, to background consolidation jobs, to semantic search and structured user model schemas.
+
+**Implemented enhancements** — 7 improvements have been implemented on top of the analysis, with 179 tests. Status and test evidence in [`docs/analysis/implementation-status.md`](docs/analysis/implementation-status.md).
+
+| Analysis Document | What it covers |
+|-------------------|---------------|
+| [`docs/analysis/self-improvement-deep-dive.md`](docs/analysis/self-improvement-deep-dive.md) | Original claim-by-claim analysis with improvement roadmap |
+| [`docs/analysis/implementation-status.md`](docs/analysis/implementation-status.md) | What was built, 179-test coverage map, next steps |
+| [`docs/analysis/rollback-cli-tests.md`](docs/analysis/rollback-cli-tests.md) | `hermes skills rollback` — 26 tests, strategy, evidence, limits |
+| [`docs/analysis/history-command.md`](docs/analysis/history-command.md) | `hermes skills history` — full feature reference, implementation walkthrough, 23 tests with interpretation guide |
+| [`docs/analysis/history-cli-tests.md`](docs/analysis/history-cli-tests.md) | `hermes skills history` — test strategy and per-test interpretation |
+| [`docs/analysis/expiry-edge-case-tests.md`](docs/analysis/expiry-edge-case-tests.md) | Memory expiry edge cases — 5 tests, `_today()` monkeypatch strategy, evidence |
+| [`docs/analysis/implementation-discussion.md`](docs/analysis/implementation-discussion.md) | Design decisions and trade-offs |
 
 ---
 
