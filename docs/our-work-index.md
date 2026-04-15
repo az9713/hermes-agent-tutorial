@@ -59,6 +59,14 @@ These docs cover the design of an automated research loop that improves skills n
 
 ---
 
+## Autoresearch Stage 3 Implementation
+
+| Doc | What it contains |
+|-----|-----------------|
+| [Stage 3 Implementation](implementation/stage3-autoresearch.md) | Component-by-component walkthrough of what was built: patch applier (recency lock, stale-patch guard, atomic writes), regression watch (causation check, rollback threshold), nightly digest formatter, `run_stage3()` entry point. Includes all design decisions (dry_run, source-aware recency lock, old/new in DB), table of all 82 new tests and what each class verifies, combined test receipt (256/256 pass, 3.34s), and the full 3-stage loop summary |
+
+---
+
 ## Modified Upstream Docs
 
 These upstream docs were extended with content from our sessions:
@@ -80,3 +88,4 @@ If you're new to this fork, the recommended reading order is:
 4. [Autoresearch MVP Plan](plans/autoresearch-mvp-plan.md) — understand the 3-stage roadmap
 5. [Stage 1 Implementation](implementation/stage1-autoresearch.md) — signal extraction, skill metrics DB, nightly report
 6. [Stage 2 Implementation](implementation/stage2-autoresearch.md) — anomaly detection, hypothesis generation, self-play evaluation, pending_patches.json
+7. [Stage 3 Implementation](implementation/stage3-autoresearch.md) — patch applier, regression watch, nightly digest, `run_stage3()`
