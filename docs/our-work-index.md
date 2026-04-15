@@ -51,6 +51,14 @@ These docs cover the design of an automated research loop that improves skills n
 
 ---
 
+## Autoresearch Stage 2 Implementation
+
+| Doc | What it contains |
+|-----|-----------------|
+| [Stage 2 Implementation](implementation/stage2-autoresearch.md) | Component-by-component walkthrough of what was built: anomaly detector, hypothesis generator, self-play evaluator, pending patches I/O, `run_stage2()` entry point. Includes all design decisions (LLM injection, scope decision, self-play grounding), table of all 81 new tests and what each class verifies, combined test receipt (174/174 pass, 1.77s) |
+
+---
+
 ## Modified Upstream Docs
 
 These upstream docs were extended with content from our sessions:
@@ -70,4 +78,5 @@ If you're new to this fork, the recommended reading order is:
 2. [Autoresearch Loop Design](ideas/autoresearch-loop.md) — understand what we're building and why
 3. [Coexistence Analysis](analysis/skill-improvement-coexistence.md) — understand how old and new systems interact
 4. [Autoresearch MVP Plan](plans/autoresearch-mvp-plan.md) — understand the 3-stage roadmap
-5. [Stage 1 Implementation](implementation/stage1-autoresearch.md) — understand what's been built so far
+5. [Stage 1 Implementation](implementation/stage1-autoresearch.md) — signal extraction, skill metrics DB, nightly report
+6. [Stage 2 Implementation](implementation/stage2-autoresearch.md) — anomaly detection, hypothesis generation, self-play evaluation, pending_patches.json

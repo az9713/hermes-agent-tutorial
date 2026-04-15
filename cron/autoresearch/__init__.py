@@ -5,21 +5,30 @@ Entry points:
   run_stage1()   Extract session signals, aggregate skill health, write report.
                  Zero risk: reads state.db, writes skill_metrics.db + report.
                  Nothing in HERMES_HOME/skills/ is modified.
+
+  run_stage2()   Detect anomalies, generate hypotheses via LLM, evaluate via
+                 self-play, write pending_patches.json.
+                 Low risk: no skill files are modified.
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from cron.autoresearch.signal_extractor import extract_signals
 from cron.autoresearch.skill_metrics import (
     already_extracted,
     compute_and_store_skill_health,
     get_skill_health_summary,
+    get_session_signals,
     open_db,
     record_session_signal,
 )
 from cron.autoresearch.reporter import generate_report
+from cron.autoresearch.anomaly_detector import detect_anomalies
+from cron.autoresearch.hypothesis_generator import generate_hypothesis
+from cron.autoresearch.self_play_evaluator import evaluate_candidate
+from cron.autoresearch.pending_patches import write_pending_patches
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +95,147 @@ def run_stage1(
     )
     logger.info("Autoresearch Stage 1 complete. Report written.")
     return report_text
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: Hypothesize + Evaluate
+# ---------------------------------------------------------------------------
+
+LlmCall = Callable[[List[Dict[str, Any]], ], str]
+
+
+def _read_skill_content(skill_name: str, hermes_home: Optional[Path]) -> Optional[str]:
+    """Read a skill's SKILL.md. Returns None if the file doesn't exist."""
+    home = hermes_home or Path.home() / ".hermes"
+    skill_md = home / "skills" / skill_name / "SKILL.md"
+    if not skill_md.exists():
+        return None
+    return skill_md.read_text(encoding="utf-8")
+
+
+def _get_session_task_excerpts(
+    metrics_conn,
+    skill_name: str,
+    days: int = 7,
+    max_excerpts: int = 5,
+) -> List[str]:
+    """Return up to max_excerpts task/correction strings for a skill.
+
+    Pulls raw session_signals for sessions that invoked this skill, extracts
+    a best-effort task label. Used to ground synthetic self-play tasks.
+    """
+    import json as _json
+    rows = get_session_signals(metrics_conn)
+    excerpts: List[str] = []
+    for row in rows:
+        try:
+            skills = _json.loads(row["skills_invoked"] or "[]")
+        except Exception:
+            skills = []
+        if skill_name in skills:
+            # Use session_id as a placeholder task description (real transcript
+            # not available here — Stage 2 uses this as a seed for rephrase)
+            excerpts.append(f"Session {row['session_id']}: {row['correction_count']} correction(s)")
+        if len(excerpts) >= max_excerpts:
+            break
+    return excerpts
+
+
+def run_stage2(
+    metrics_db_path: Optional[Path] = None,
+    patches_path: Optional[Path] = None,
+    hermes_home: Optional[Path] = None,
+    llm_call: Optional[LlmCall] = None,
+    days: int = 7,
+) -> List[Dict[str, Any]]:
+    """Run the Stage 2 autoresearch cycle.
+
+    Steps:
+      1. Detect anomalies from skill_metrics.db.
+      2. For each anomaly, generate a hypothesis (LLM patch proposal).
+      3. Evaluate each hypothesis via self-play (LLM judge).
+      4. Write pending_patches.json with all results.
+
+    Returns list of pending patch dicts (same schema as pending_patches.json).
+
+    Args:
+        metrics_db_path: Path to skill_metrics.db. Defaults to HERMES_HOME/autoresearch/skill_metrics.db.
+        patches_path:    Path for pending_patches.json. Defaults to HERMES_HOME/autoresearch/pending_patches.json.
+        hermes_home:     Override HERMES_HOME. Used in tests.
+        llm_call:        Injected LLM callable. If None, imports call_llm from
+                         agent.auxiliary_client and wraps it.
+        days:            Rolling window for anomaly detection. Default 7.
+    """
+    logger.info("Autoresearch Stage 2 starting")
+
+    # Resolve LLM callable
+    if llm_call is None:
+        try:
+            from agent.auxiliary_client import call_llm as _call_llm  # type: ignore
+
+            def llm_call(messages):
+                resp = _call_llm(messages=messages)
+                return resp.choices[0].message.content
+        except ImportError:
+            logger.error("agent.auxiliary_client not available and no llm_call injected")
+            raise
+
+    # 1. Detect anomalies
+    metrics_conn = open_db(metrics_db_path)
+    anomalies = detect_anomalies(metrics_conn, days=days)
+    logger.info("Detected %d anomaly(-ies)", len(anomalies))
+
+    if not anomalies:
+        logger.info("No anomalies detected — writing empty pending_patches.json")
+        write_pending_patches([], path=patches_path)
+        metrics_conn.close()
+        return []
+
+    # 2-3. Generate hypothesis + evaluate for each anomaly
+    pairs: List[Dict[str, Any]] = []
+    for anomaly in anomalies:
+        skill_name = anomaly["skill_name"]
+
+        # Read current SKILL.md
+        skill_content = _read_skill_content(skill_name, hermes_home)
+        if skill_content is None:
+            logger.warning("SKILL.md not found for '%s' — skipping", skill_name)
+            continue
+
+        # Gather session excerpts to ground self-play tasks
+        excerpts = _get_session_task_excerpts(metrics_conn, skill_name, days=days)
+
+        # Generate hypothesis
+        candidate = generate_hypothesis(
+            anomaly=anomaly,
+            skill_content=skill_content,
+            session_excerpts=excerpts,
+            llm_call=llm_call,
+        )
+        if candidate is None:
+            logger.info("No hypothesis generated for '%s' — skipping", skill_name)
+            continue
+
+        # Evaluate via self-play
+        eval_result = evaluate_candidate(
+            candidate_patch=candidate,
+            skill_content_old=skill_content,
+            session_tasks=excerpts,
+            llm_call=llm_call,
+        )
+        logger.info(
+            "Skill '%s': status=%s token_delta=%.2f quality_delta=%.2f",
+            skill_name,
+            eval_result["status"],
+            eval_result["token_delta"],
+            eval_result["quality_delta"],
+        )
+
+        pairs.append({"candidate": candidate, "eval_result": eval_result})
+
+    metrics_conn.close()
+
+    # 4. Write pending_patches.json
+    write_pending_patches(pairs, path=patches_path)
+    logger.info("Autoresearch Stage 2 complete. %d patch(es) evaluated.", len(pairs))
+    return pairs
