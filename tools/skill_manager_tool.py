@@ -301,20 +301,26 @@ def _append_skill_history(
     file_path: str,
     old_text: str,
     new_text: str,
+    source: str = "in-session",
 ) -> None:
     """
     Append a history record to SKILL_HISTORY.md inside skill_dir.
 
-    Each record contains: timestamp, action, reason, file path, old block, new block.
+    Each record contains: timestamp, action, source, reason, file path, old block, new block.
     The file is append-only so history is never lost, and rollback entries are
     themselves recorded (making rollback reversible).
+
+    source identifies which system wrote the entry:
+      "in-session"                 — LLM called skill_manage during a conversation (default)
+      "autoresearch"               — nightly autoresearch cron applied the patch
+      "autoresearch: regression-watch" — autoresearch regression watch rolled back a patch
 
     Uses _atomic_write_text to avoid partial writes.
     """
     history_path = skill_dir / SKILL_HISTORY_FILE
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     record = (
-        f"\n## {now} — {action}\n"
+        f"\n## {now} — {action} [{source}]\n"
         f"**Reason:** {reason or '(no reason given)'}\n"
         f"**File:** {file_path}\n"
         f"\n### Old\n```text\n{old_text}\n```\n"
