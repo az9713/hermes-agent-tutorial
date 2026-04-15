@@ -899,6 +899,9 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
         return 0
 
     try:
+        # Autoresearch runs on its own schedule, independent of cron jobs.
+        _tick_autoresearch(adapters=adapters, loop=loop)
+
         due_jobs = get_due_jobs()
 
         if verbose and not due_jobs:
@@ -957,6 +960,95 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
             except (OSError, IOError):
                 pass
         lock_fd.close()
+
+
+# ── Autoresearch tick ─────────────────────────────────────────────────────────
+
+def _tick_autoresearch(adapters=None, loop=None) -> bool:
+    """Check whether the autoresearch loop is due and run it if so.
+
+    Called from tick() on every scheduler beat.  Reads schedule from config,
+    compares against last_run_at in state.json, and fires run_full_loop() when
+    the next occurrence is in the past.
+
+    Delivery of the nightly digest is handled inside run_full_loop() via
+    runner.deliver_digest() which reads autoresearch.deliver from config.
+
+    Returns True if the loop ran this beat, False otherwise.
+    """
+    try:
+        from hermes_cli.config import load_config
+        config = load_config()
+    except Exception as e:
+        logger.warning("Autoresearch tick: could not load config: %s", e)
+        return False
+
+    ar = config.get("autoresearch", {})
+    if not ar.get("enabled", True):
+        return False
+
+    schedule = ar.get("schedule", "0 2 * * *")
+    dry_run = ar.get("dry_run", False)
+    deliver_platforms = ar.get("deliver", [])
+
+    # Determine when the loop last ran
+    try:
+        from cron.autoresearch.runner import load_run_state
+        state = load_run_state()
+        last_run_at_str = state.get("last_run_at")
+    except Exception as e:
+        logger.warning("Autoresearch tick: could not load run state: %s", e)
+        last_run_at_str = None
+
+    # Check if the next scheduled occurrence is now due
+    try:
+        from datetime import datetime, timezone
+        import croniter as _croniter
+
+        now = datetime.now(timezone.utc)
+
+        if last_run_at_str:
+            last_run_at = datetime.fromisoformat(last_run_at_str)
+            if last_run_at.tzinfo is None:
+                last_run_at = last_run_at.replace(tzinfo=timezone.utc)
+            base_dt = last_run_at
+        else:
+            # Never run — use midnight yesterday so it fires immediately
+            base_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            from datetime import timedelta
+            base_dt -= timedelta(days=1)
+
+        cron = _croniter.croniter(schedule, base_dt)
+        next_run = cron.get_next(datetime)
+        if next_run.tzinfo is None:
+            next_run = next_run.replace(tzinfo=timezone.utc)
+
+        if now < next_run:
+            return False  # not yet due
+
+    except ImportError:
+        logger.debug("croniter not installed — autoresearch tick schedule check skipped")
+        return False
+    except Exception as e:
+        logger.warning("Autoresearch tick: schedule check failed: %s", e)
+        return False
+
+    # Due — run the loop
+    logger.info("Autoresearch loop is due (schedule=%s). Running.", schedule)
+    try:
+        from cron.autoresearch.runner import run_full_loop, deliver_digest
+        digest = run_full_loop(dry_run=dry_run)
+        if deliver_platforms:
+            results = deliver_digest(digest, deliver_platforms)
+            for platform, err in results.items():
+                if err:
+                    logger.error("Autoresearch delivery to %s failed: %s", platform, err)
+                else:
+                    logger.info("Autoresearch digest delivered to %s", platform)
+    except Exception as e:
+        logger.error("Autoresearch loop failed: %s", e)
+
+    return True
 
 
 if __name__ == "__main__":

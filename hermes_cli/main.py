@@ -2654,6 +2654,12 @@ def cmd_cron(args):
     cron_command(args)
 
 
+def cmd_autoresearch(args):
+    """Autoresearch loop management."""
+    from hermes_cli.autoresearch import autoresearch_command
+    return autoresearch_command(args)
+
+
 def cmd_webhook(args):
     """Webhook subscription management."""
     from hermes_cli.webhook import webhook_command
@@ -3899,7 +3905,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "chat", "model", "gateway", "setup", "whatsapp", "login", "logout", "auth",
         "status", "cron", "doctor", "config", "pairing", "skills", "tools",
         "mcp", "sessions", "insights", "version", "update", "uninstall",
-        "profile",
+        "profile", "autoresearch",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
 
@@ -4732,6 +4738,34 @@ For more help on a command:
     wh_test.add_argument("--payload", default="", help="JSON payload to send (default: test payload)")
 
     webhook_parser.set_defaults(func=cmd_webhook)
+
+    # =========================================================================
+    # autoresearch command
+    # =========================================================================
+    autoresearch_parser = subparsers.add_parser(
+        "autoresearch",
+        help="Nightly autoresearch loop management",
+        description="Manage the autonomous nightly skill-improvement loop",
+    )
+    autoresearch_subparsers = autoresearch_parser.add_subparsers(dest="autoresearch_cmd")
+
+    ar_run = autoresearch_subparsers.add_parser("run", help="Run the loop immediately")
+    ar_run.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Log what would happen but do not modify any skill files",
+    )
+
+    autoresearch_subparsers.add_parser("status", help="Show last run status and config")
+    autoresearch_subparsers.add_parser("patches", help="Print pending_patches.json")
+    autoresearch_subparsers.add_parser("enable", help="Enable the autoresearch loop")
+    autoresearch_subparsers.add_parser("disable", help="Disable the autoresearch loop")
+
+    ar_sched = autoresearch_subparsers.add_parser("schedule", help="Set the cron schedule")
+    ar_sched.add_argument("expr", help="Cron expression, e.g. '0 2 * * *'")
+
+    autoresearch_parser.set_defaults(func=cmd_autoresearch)
 
     # =========================================================================
     # doctor command

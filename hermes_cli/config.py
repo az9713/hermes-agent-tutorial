@@ -623,6 +623,20 @@ DEFAULT_CONFIG = {
         "wrap_response": True,
     },
 
+    # Autoresearch loop — nightly autonomous skill improvement.
+    "autoresearch": {
+        # Set to false to prevent the loop from running on schedule.
+        "enabled": True,
+        # Cron expression for when to run. Default: 02:00 every night.
+        "schedule": "0 2 * * *",
+        # If true, Stage 3 will log what it would do but not modify any skill files.
+        "dry_run": False,
+        # List of platforms to send the nightly digest to.
+        # Uses {PLATFORM}_HOME_CHANNEL env var for the destination channel.
+        # Example: ["slack", "telegram"]
+        "deliver": [],
+    },
+
     # Logging — controls file logging to ~/.hermes/logs/.
     # agent.log captures INFO+ (all agent activity); errors.log captures WARNING+.
     "logging": {
