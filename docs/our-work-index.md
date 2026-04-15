@@ -67,6 +67,20 @@ These docs cover the design of an automated research loop that improves skills n
 
 ---
 
+## Autoresearch Scheduling, CLI & Delivery
+
+These components complete the autoresearch loop by wiring it into the nightly
+scheduler, exposing it via the CLI, and delivering digests to Slack & Telegram.
+
+| Component | What it contains |
+|-----------|-----------------|
+| `cron/autoresearch/runner.py` | Full-loop orchestrator: `run_full_loop()` chains Stage 1→2→3, `deliver_digest()` sends the nightly digest to Slack/Telegram/any gateway platform, `save_run_state()` / `load_run_state()` persist last-run status to `~/.hermes/autoresearch/state.json`. 21 tests. |
+| `hermes_cli/autoresearch.py` | CLI handler for `hermes autoresearch run [--dry-run]`, `status`, `schedule <expr>`, `patches`, `enable`, `disable`. 16 tests. |
+| `hermes_cli/config.py` (autoresearch section) | `DEFAULT_CONFIG["autoresearch"]`: `enabled`, `schedule` (cron expr), `dry_run`, `deliver` (list of platform names). |
+| `cron/scheduler.py` (`_tick_autoresearch`) | Called on every 60-second scheduler beat. Reads config + state.json, checks croniter schedule, fires `run_full_loop()` when due, calls `deliver_digest()` for configured platforms. 10 tests. |
+
+---
+
 ## Modified Upstream Docs
 
 These upstream docs were extended with content from our sessions:
@@ -89,3 +103,4 @@ If you're new to this fork, the recommended reading order is:
 5. [Stage 1 Implementation](implementation/stage1-autoresearch.md) — signal extraction, skill metrics DB, nightly report
 6. [Stage 2 Implementation](implementation/stage2-autoresearch.md) — anomaly detection, hypothesis generation, self-play evaluation, pending_patches.json
 7. [Stage 3 Implementation](implementation/stage3-autoresearch.md) — patch applier, regression watch, nightly digest, `run_stage3()`
+8. Autoresearch Scheduling & CLI (above table) — how the loop runs nightly and delivers digests
