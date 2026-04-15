@@ -167,10 +167,19 @@ Hold if:    judges disagree → flag for human review
 
 ### Phase 5: Apply (Fully Autonomous)
 
-For each accepted patch:
+Before applying, check recency lock:
+
 ```python
-skill_manage(action="patch", reason="autoresearch: <anomaly_type>", ...)
-# Append to SKILL_HISTORY.md
+last_patch = get_last_patch_timestamp(skill_name)  # reads SKILL_HISTORY.md
+if last_patch and (now - last_patch) < timedelta(hours=24):
+    defer_to_next_night(skill_name)  # in-session patch too recent — skip
+    continue
+```
+
+For each accepted patch that passes the recency lock:
+```python
+skill_manage(action="patch", reason="autoresearch: <anomaly_type>",
+             source="autoresearch", ...)   # source tag in SKILL_HISTORY.md
 # Record baseline_metrics snapshot for regression detection tomorrow
 ```
 
@@ -190,13 +199,19 @@ memory(action="replace", ...)
 
 ### Phase 6: Regression Watch (next night)
 
-Compare today's skill metrics vs. snapshot taken at patch time.
+Compare today's skill metrics vs. snapshot taken at patch time. **Only roll back when autoresearch was the sole writer since its patch:**
 
 ```
-If correction_rate increased >15% after patch:
-  → auto-rollback via SKILL_HISTORY.md
+If in-session patches occurred since autoresearch patch:
+  → causation is ambiguous
+  → flag in digest for human review — do NOT auto-rollback
+
+If autoresearch was sole writer AND correction_rate increased >15%:
+  → auto-rollback via SKILL_HISTORY.md (tagged [autoresearch: regression-watch])
   → flag in digest: "Skill X auto-rolled back — patch degraded performance"
 ```
+
+See `docs/analysis/skill-improvement-coexistence.md` for why this scoping matters.
 
 ---
 
@@ -264,6 +279,23 @@ Minimum version that tests the core hypothesis (does automated skill patching im
 - ELO tournament across skill versions
 - Multi-day trend analysis
 - Semantic embedding similarity for skill deduplication
+
+## Coexistence with In-Session LLM Patching
+
+The autoresearch loop is not the only system that modifies `SKILL.md` files. The existing in-session LLM patching mechanism does too, and without coordination they conflict. See **`docs/analysis/skill-improvement-coexistence.md`** for the full conflict analysis.
+
+The short version: four coordination mechanisms prevent conflicts.
+
+| Mechanism | What it does |
+|-----------|-------------|
+| **Recency lock** | Autoresearch skips skills patched in-session within last 24h |
+| **In-session patch rate as signal** | ≥3 in-session patches in 7 days → autoresearch proposes full rewrite, not another patch |
+| **Source tagging** | Every `SKILL_HISTORY.md` entry tagged `[in-session]` or `[autoresearch]` — always auditable |
+| **Scoped regression watch** | Phase 6 only rolls back its own patches; flags ambiguous cases for human review |
+
+The mental model: in-session patching = hotfixes. Autoresearch = releases. Releases build on hotfixes, never over them.
+
+---
 
 ## Not Doing (and Why)
 
