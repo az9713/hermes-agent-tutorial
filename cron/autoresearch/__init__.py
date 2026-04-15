@@ -28,7 +28,10 @@ from cron.autoresearch.reporter import generate_report
 from cron.autoresearch.anomaly_detector import detect_anomalies
 from cron.autoresearch.hypothesis_generator import generate_hypothesis
 from cron.autoresearch.self_play_evaluator import evaluate_candidate
-from cron.autoresearch.pending_patches import write_pending_patches
+from cron.autoresearch.pending_patches import write_pending_patches, read_pending_patches
+from cron.autoresearch.applier import apply_patches
+from cron.autoresearch.regression_watch import check_regressions
+from cron.autoresearch.digest import generate_digest
 
 logger = logging.getLogger(__name__)
 
@@ -239,3 +242,73 @@ def run_stage2(
     write_pending_patches(pairs, path=patches_path)
     logger.info("Autoresearch Stage 2 complete. %d patch(es) evaluated.", len(pairs))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: Apply + Recover
+# ---------------------------------------------------------------------------
+
+def run_stage3(
+    metrics_db_path: Optional[Path] = None,
+    patches_path: Optional[Path] = None,
+    digest_path: Optional[Path] = None,
+    hermes_home: Optional[Path] = None,
+    dry_run: bool = False,
+    run_regression_watch: bool = True,
+) -> str:
+    """Run the Stage 3 autoresearch cycle.
+
+    Steps:
+      1. Read pending_patches.json (written by Stage 2).
+      2. Apply accepted patches (with recency lock, stale-patch guard, dry_run).
+      3. Run regression watch for previously applied patches.
+      4. Generate and write nightly_digest.md.
+
+    Returns the digest text.
+
+    Args:
+        metrics_db_path:      Path to skill_metrics.db.
+        patches_path:         Path to pending_patches.json.
+        digest_path:          Path for nightly_digest.md.
+        hermes_home:          Override HERMES_HOME. Used in tests.
+        dry_run:              If True, log what would happen but write nothing to skills/.
+        run_regression_watch: If False, skip regression watch (useful for first-run).
+    """
+    logger.info("Autoresearch Stage 3 starting (dry_run=%s)", dry_run)
+
+    metrics_conn = open_db(metrics_db_path)
+
+    # 1. Read pending_patches.json
+    patches = read_pending_patches(path=patches_path)
+    logger.info("Stage 3: read %d pending patch(es)", len(patches))
+
+    # 2. Apply accepted patches
+    apply_results = apply_patches(
+        patches=patches,
+        metrics_conn=metrics_conn,
+        hermes_home=hermes_home or Path.home() / ".hermes",
+        dry_run=dry_run,
+    )
+    applied_count = sum(1 for r in apply_results if r["status"] == "applied")
+    logger.info("Stage 3: applied %d patch(es)", applied_count)
+
+    # 3. Regression watch
+    watch_results = []
+    if run_regression_watch:
+        watch_results = check_regressions(
+            metrics_conn=metrics_conn,
+            hermes_home=hermes_home or Path.home() / ".hermes",
+        )
+        logger.info("Stage 3: regression watch examined %d patch(es)", len(watch_results))
+
+    metrics_conn.close()
+
+    # 4. Generate digest
+    digest_text = generate_digest(
+        apply_results=apply_results,
+        watch_results=watch_results,
+        pending_patches=patches,
+        report_path=digest_path,
+    )
+    logger.info("Autoresearch Stage 3 complete. Digest written.")
+    return digest_text

@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS autoresearch_patches (
     baseline_tokens          REAL,
     baseline_correction_rate REAL,
     baseline_completion_rate REAL,
+    old_string               TEXT,
+    new_string               TEXT,
     status                   TEXT    DEFAULT 'applied'
 );
 """
@@ -213,6 +215,80 @@ def compute_and_store_skill_health(
             "completion_rate": completion_rate,
         })
     return results
+
+
+# ---------------------------------------------------------------------------
+# autoresearch_patches
+# ---------------------------------------------------------------------------
+
+def record_autoresearch_patch(
+    conn: sqlite3.Connection,
+    skill_name: str,
+    patch_type: str,
+    baseline_correction_rate: float,
+    baseline_completion_rate: float,
+    baseline_tokens: float = 0.0,
+    old_string: str = "",
+    new_string: str = "",
+) -> int:
+    """Insert a row into autoresearch_patches and return its id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = conn.execute(
+        """
+        INSERT INTO autoresearch_patches
+            (skill_name, patch_applied_at, patch_type,
+             baseline_tokens, baseline_correction_rate, baseline_completion_rate,
+             old_string, new_string, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'applied')
+        """,
+        (
+            skill_name,
+            now,
+            patch_type,
+            baseline_tokens,
+            baseline_correction_rate,
+            baseline_completion_rate,
+            old_string,
+            new_string,
+        ),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def get_applied_patches(
+    conn: sqlite3.Connection,
+    since_ts: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return autoresearch_patches rows with status='applied'.
+
+    Args:
+        since_ts: ISO-8601 string; only return patches applied on or after this time.
+                  If None, returns all applied patches.
+    """
+    if since_ts:
+        rows = conn.execute(
+            "SELECT * FROM autoresearch_patches WHERE status='applied' AND patch_applied_at >= ?",
+            (since_ts,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM autoresearch_patches WHERE status='applied'"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_patch_status(
+    conn: sqlite3.Connection,
+    patch_id: int,
+    status: str,
+) -> None:
+    """Update the status of an autoresearch_patches row."""
+    conn.execute(
+        "UPDATE autoresearch_patches SET status=? WHERE id=?",
+        (status, patch_id),
+    )
+    conn.commit()
 
 
 def get_skill_health_summary(
