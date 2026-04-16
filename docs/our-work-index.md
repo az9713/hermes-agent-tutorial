@@ -16,6 +16,7 @@ These docs analyse how Hermes's self-improvement actually works in practice — 
 | [Implementation Status](analysis/implementation-status.md) | Post-implementation record: exactly what was built, what the 179 tests cover and don't, and what conclusions they actually support |
 | [Session Notes (2026-04-14)](analysis/session-2026-04-14.md) | Running notes from the codebase study and autoresearch design sessions — architecture survey, self-improvement reality check, Karpathy loop design |
 | [E2E Test Analysis](analysis/e2e-autoresearch-test-analysis.md) | Honest coverage analysis of `tests/integration/test_autoresearch_e2e.py` — what runs real code, what is scripted, what is not tested, and why the tests do not prove the feature is useful |
+| [Golden-Answer Test](analysis/golden-answer-test.md) | Reference for `tests/cron/test_autoresearch_golden_answer.py` — the only test that uses a real Claude API call; documents the `safe-git-push` scenario, the non-circular golden assertion, Pass/Skip/Fail semantics, and what it still does not cover |
 
 ---
 
