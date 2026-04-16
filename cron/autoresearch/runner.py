@@ -201,6 +201,7 @@ def run_full_loop(
     run_regression_watch: bool = True,
     skip_stage2: bool = False,
     state_path: Optional[Path] = None,
+    llm_call=None,
 ) -> str:
     """Run the full nightly autoresearch loop: Stage 1 → Stage 2 → Stage 3.
 
@@ -244,6 +245,7 @@ def run_full_loop(
                 metrics_db_path=metrics_db_path,
                 patches_path=patches_path,
                 hermes_home=hermes_home,
+                llm_call=llm_call,
             )
             logger.info("Stage 2 complete")
         except ImportError as e:
