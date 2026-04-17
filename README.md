@@ -6,6 +6,7 @@
 > - A comprehensive set of tutorial and reference documents in [`docs/`](docs/index.md)
 > - An original deep-dive analysis of Hermes Agent's self-improvement architecture ([`docs/analysis/`](docs/analysis/self-improvement-deep-dive.md))
 > - Working implementations of 7 self-improvement enhancements from that analysis — including `hermes skills rollback`, `hermes skills history`, patch audit trails, memory expiry edge-case fixes, and 179 automated tests ([`docs/analysis/implementation-status.md`](docs/analysis/implementation-status.md))
+> - A production-style autoresearch hardening pass: measurement-fidelity upgrades across Stage 1/2/3, memory contradiction hardening with two-phase apply, and operator confidence reporting with expanded test coverage ([`docs/implementation/autoresearch-measurement-fidelity-upgrade.md`](docs/implementation/autoresearch-measurement-fidelity-upgrade.md), [`docs/analysis/autoresearch-measurement-fidelity-test-report.md`](docs/analysis/autoresearch-measurement-fidelity-test-report.md))
 >
 > The original project, all code, and all credit belong to [Nous Research](https://nousresearch.com). See the upstream repo for the latest features and releases.
 
@@ -157,6 +158,26 @@ The analysis includes concrete improvement suggestions for each claim — from p
 | [`docs/analysis/history-cli-tests.md`](docs/analysis/history-cli-tests.md) | `hermes skills history` — test strategy and per-test interpretation |
 | [`docs/analysis/expiry-edge-case-tests.md`](docs/analysis/expiry-edge-case-tests.md) | Memory expiry edge cases — 5 tests, `_today()` monkeypatch strategy, evidence |
 | [`docs/analysis/implementation-discussion.md`](docs/analysis/implementation-discussion.md) | Design decisions and trade-offs |
+
+### 3. Autoresearch Hardening (Stage 1/2/3 + Memory)
+
+This fork now includes a hardened autoresearch path aimed at production safety and measurement validity:
+
+- richer Stage 1 signal labeling and attribution,
+- Stage 2 composite evaluation (self-play + holdout + rubric + optional dual-judge),
+- deterministic multi-class anomaly detection (`UNDERPERFORMING`, `STRUCTURALLY_BROKEN`, `MISSING_COVERAGE`),
+- memory contradiction hardening with weighted evidence + ambiguity suppression,
+- two-phase memory apply lifecycle with conservative `needs_review` routing,
+- operator confidence KPIs surfaced in digest and CLI status.
+
+Primary references:
+
+- [`docs/implementation/autoresearch-measurement-fidelity-upgrade.md`](docs/implementation/autoresearch-measurement-fidelity-upgrade.md)
+- [`docs/implementation/autoresearch-memory-v1.md`](docs/implementation/autoresearch-memory-v1.md)
+- [`docs/analysis/autoresearch-measurement-fidelity-test-report.md`](docs/analysis/autoresearch-measurement-fidelity-test-report.md)
+- [`docs/our-work-index.md`](docs/our-work-index.md)
+
+Implementation note: the autoresearch hardening implementation and documentation in this fork were produced with assistance from Codex powered by GPT-5.3-Codex, with human review.
 
 ---
 
