@@ -29,8 +29,9 @@ from pathlib import Path
 import pytest
 
 from cron.autoresearch import run_stage2
-from cron.autoresearch.skill_metrics import open_db, upsert_skill_health
+from cron.autoresearch.skill_metrics import open_db, record_session_signal, upsert_skill_health
 from cron.autoresearch.pending_patches import read_pending_patches
+from cron.autoresearch.pending_memory_updates import read_pending_memory_updates
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -280,3 +281,82 @@ class TestStage2Integration:
 
         assert skill_file.read_text(encoding="utf-8") == original_content
         assert skill_file.stat().st_mtime == original_mtime
+
+    def test_memory_proposals_written_and_persisted(self, tmp_path):
+        db_path = tmp_path / "metrics.db"
+        conn = open_db(db_path)
+        record_session_signal(
+            conn,
+            {
+                "session_id": "s1",
+                "session_date": "2099-01-01",
+                "total_tokens": 200,
+                "tool_call_count": 1,
+                "correction_count": 1,
+                "correction_snippets": ["that's wrong, never use branch main for deploy"],
+                "completion_flag": False,
+                "skills_invoked": [],
+            },
+        )
+        record_session_signal(
+            conn,
+            {
+                "session_id": "s2",
+                "session_date": "2099-01-01",
+                "total_tokens": 220,
+                "tool_call_count": 1,
+                "correction_count": 1,
+                "correction_snippets": ["that's incorrect, never use branch main for deploy"],
+                "completion_flag": False,
+                "skills_invoked": [],
+            },
+        )
+        conn.close()
+
+        mem_dir = tmp_path / "memories"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        (mem_dir / "MEMORY.md").write_text("Always use branch main for deploy.", encoding="utf-8")
+
+        def llm_call(messages):
+            last = messages[-1]["content"]
+            if "Current entry:" in last and "Propose exactly one update" in last:
+                return (
+                    '{"action":"replace","target":"memory","old_text":"Always use branch main for deploy.",'
+                    '"content":"Use release branches for deploy.","reason":"policy changed","confidence":0.9}'
+                )
+            return "{}"
+
+        run_stage2(
+            metrics_db_path=db_path,
+            hermes_home=tmp_path,
+            llm_call=llm_call,
+            days=7,
+        )
+
+        pending_mem = read_pending_memory_updates(
+            tmp_path / "autoresearch" / "pending_memory_updates.json"
+        )
+        assert len(pending_mem) == 1
+
+        conn = open_db(db_path)
+        row = conn.execute(
+            "SELECT status, target, action FROM autoresearch_memory_updates ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        assert row["status"] == "proposed"
+        assert row["target"] == "memory"
+        assert row["action"] == "replace"
+
+    def test_memory_updates_can_be_disabled(self, tmp_path):
+        db_path = tmp_path / "metrics.db"
+        open_db(db_path).close()
+        run_stage2(
+            metrics_db_path=db_path,
+            hermes_home=tmp_path,
+            llm_call=lambda _messages: "{}",
+            enable_memory_updates=False,
+        )
+        pending_mem = read_pending_memory_updates(
+            tmp_path / "autoresearch" / "pending_memory_updates.json"
+        )
+        assert pending_mem == []

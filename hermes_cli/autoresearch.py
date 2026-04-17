@@ -51,6 +51,46 @@ def _read_pending_patches(patches_path: Optional[Path] = None) -> list:
     return read_pending_patches(path=patches_path)
 
 
+def _read_pending_memory_updates(path: Optional[Path] = None) -> list:
+    from cron.autoresearch.pending_memory_updates import read_pending_memory_updates
+    return read_pending_memory_updates(path=path)
+
+
+def _memory_update_counts(home: Path) -> dict:
+    from cron.autoresearch.skill_metrics import open_db, get_memory_update_counts
+    db_path = home / "autoresearch" / "skill_metrics.db"
+    conn = open_db(db_path)
+    try:
+        return get_memory_update_counts(conn)
+    finally:
+        conn.close()
+
+
+def _operator_confidence_metrics(home: Path, days: int = 30) -> dict:
+    from cron.autoresearch.skill_metrics import open_db, get_operator_confidence_metrics
+    db_path = home / "autoresearch" / "skill_metrics.db"
+    conn = open_db(db_path)
+    try:
+        return get_operator_confidence_metrics(conn, days=days)
+    finally:
+        conn.close()
+
+
+def _recent_memory_outcomes(home: Path, limit: int = 5) -> list:
+    from cron.autoresearch.skill_metrics import open_db, list_memory_updates
+    db_path = home / "autoresearch" / "skill_metrics.db"
+    conn = open_db(db_path)
+    try:
+        rows = list_memory_updates(conn)
+    finally:
+        conn.close()
+    closed = [
+        r for r in rows
+        if r.get("status") in {"applied", "discarded", "needs_review", "failed"}
+    ]
+    return closed[:limit]
+
+
 # ── Subcommand handlers ───────────────────────────────────────────────────────
 
 def _cmd_run(args) -> int:
@@ -97,6 +137,38 @@ def _cmd_status(args) -> int:
         f"  last run:    {last_run}",
         f"  last status: {status_icon} {last_status}",
     ]
+    home = _get_hermes_home()
+    try:
+        counts = _memory_update_counts(home)
+        lines.extend(
+            [
+                "",
+                "  memory queue:",
+                f"    proposed:            {counts.get('proposed', 0)}",
+                f"    pending_revalidation:{counts.get('pending_revalidation', 0)}",
+                f"    needs_review:        {counts.get('needs_review', 0)}",
+                "  memory outcomes:",
+                f"    applied:             {counts.get('applied', 0)}",
+                f"    discarded:           {counts.get('discarded', 0)}",
+                f"    failed:              {counts.get('failed', 0)}",
+            ]
+        )
+    except Exception:
+        pass
+    try:
+        metrics = _operator_confidence_metrics(home, days=30)
+        lines.extend(
+            [
+                "",
+                "  operator confidence (30d):",
+                f"    patch_stability_ratio:      {float(metrics.get('patch_stability_ratio', 0.0)):.1%}",
+                f"    acceptance/regression:      {float(metrics.get('acceptance_to_regression_ratio', 0.0)):.2f}",
+                f"    memory_precision_proxy:     {float(metrics.get('memory_precision_proxy', 0.0)):.1%}",
+                f"    holdout_pass_rate:          {float(metrics.get('holdout_pass_rate', 0.0)):.1%}",
+            ]
+        )
+    except Exception:
+        pass
     if last_error:
         lines.append(f"  last error:  {last_error}")
 
@@ -128,41 +200,71 @@ def _cmd_schedule(args) -> int:
 
 
 def _cmd_patches(args) -> int:
-    """Print pending_patches.json in a readable form."""
+    """Print pending skill and memory updates in readable form."""
     home = _get_hermes_home()
     patches_path = home / "autoresearch" / "pending_patches.json"
+    memory_updates_path = home / "autoresearch" / "pending_memory_updates.json"
 
-    if not patches_path.exists():
-        print("No pending_patches.json found.")
+    if not patches_path.exists() and not memory_updates_path.exists():
+        print("No pending_patches.json or pending_memory_updates.json found.")
         return 0
 
     patches = _read_pending_patches(patches_path)
-    if not patches:
+    mem_updates = _read_pending_memory_updates(memory_updates_path)
+
+    if patches:
+        print(f"Pending skill patches ({len(patches)}):\n")
+        for i, p in enumerate(patches, 1):
+            skill = p.get("skill_name", "?")
+            status = p.get("status", "?")
+            accepted = p.get("accepted", False)
+            reason = p.get("reason", "")
+            token_delta = p.get("token_delta")
+            quality_delta = p.get("quality_delta")
+            rejection_reason = p.get("rejection_reason", "")
+
+            icon = "✓" if accepted else "✗"
+            delta_str = ""
+            if token_delta is not None and quality_delta is not None:
+                delta_str = f"  token Δ={token_delta:+.0%}  quality Δ={quality_delta:+.2f}"
+
+            print(f"  {i}. [{icon}] {skill} — {status}")
+            if reason:
+                print(f"       reason: {reason}")
+            if delta_str:
+                print(f"      {delta_str}")
+            if rejection_reason:
+                print(f"       rejected: {rejection_reason}")
+    else:
         print("pending_patches.json is empty.")
-        return 0
 
-    print(f"Pending patches ({len(patches)}):\n")
-    for i, p in enumerate(patches, 1):
-        skill = p.get("skill_name", "?")
-        status = p.get("status", "?")
-        accepted = p.get("accepted", False)
-        reason = p.get("reason", "")
-        token_delta = p.get("token_delta")
-        quality_delta = p.get("quality_delta")
-        rejection_reason = p.get("rejection_reason", "")
+    print()
+    if mem_updates:
+        print(f"Pending memory updates ({len(mem_updates)}):\n")
+        for i, m in enumerate(mem_updates, 1):
+            tgt = m.get("target", "?")
+            action = m.get("action", "?")
+            conf = float(m.get("confidence", 0.0))
+            evidence = int(m.get("evidence_count", 0))
+            reason = m.get("reason", "")
+            print(f"  {i}. {tgt}.{action} confidence={conf:.2f} evidence={evidence}")
+            if reason:
+                print(f"       reason: {reason}")
+    else:
+        print("pending_memory_updates.json is empty.")
 
-        icon = "✓" if accepted else "✗"
-        delta_str = ""
-        if token_delta is not None and quality_delta is not None:
-            delta_str = f"  token Δ={token_delta:+.0%}  quality Δ={quality_delta:+.2f}"
-
-        print(f"  {i}. [{icon}] {skill} — {status}")
-        if reason:
-            print(f"       reason: {reason}")
-        if delta_str:
-            print(f"      {delta_str}")
-        if rejection_reason:
-            print(f"       rejected: {rejection_reason}")
+    outcomes = _recent_memory_outcomes(home, limit=5)
+    if outcomes:
+        print()
+        print("Recent memory outcomes:\n")
+        for i, row in enumerate(outcomes, 1):
+            target = row.get("target", "?")
+            action = row.get("action", "?")
+            status = row.get("status", "?")
+            err = row.get("error", "")
+            print(f"  {i}. memory/{target}.{action} -> {status}")
+            if err:
+                print(f"       detail: {err}")
     return 0
 
 

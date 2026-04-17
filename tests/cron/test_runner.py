@@ -199,6 +199,23 @@ class TestRunFullLoop:
         call_kwargs = mock3.call_args.kwargs
         assert call_kwargs.get("dry_run") is True
 
+    def test_memory_flags_passed_through(self, tmp_path):
+        pending_mem = tmp_path / "pending_memory_updates.json"
+        with (
+            patch(PATCH_STAGE1),
+            patch(PATCH_STAGE2) as mock2,
+            patch(PATCH_STAGE3, return_value="digest") as mock3,
+        ):
+            _patched_loop(
+                tmp_path,
+                enable_memory_updates=False,
+                run_memory_apply=False,
+                pending_memory_updates_path=pending_mem,
+            )
+        assert mock2.call_args.kwargs["enable_memory_updates"] is False
+        assert mock2.call_args.kwargs["pending_memory_updates_path"] == pending_mem
+        assert mock3.call_args.kwargs["run_memory_apply"] is False
+
     def test_state_written_even_when_all_stages_fail(self, tmp_path):
         with (
             patch(PATCH_STAGE1, side_effect=RuntimeError("s1")),

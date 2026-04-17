@@ -250,6 +250,56 @@ class TestNeedsAttention:
 
 # ── Tests: file output ────────────────────────────────────────────────────────
 
+class TestMemorySections:
+    def test_proposed_memory_section(self, tmp_path):
+        path = tmp_path / "nightly_digest.md"
+        text = generate_digest(
+            apply_results=[],
+            watch_results=[],
+            pending_patches=[],
+            memory_proposed=[
+                {"target": "memory", "action": "replace", "confidence": 0.9, "evidence_count": 3}
+            ],
+            report_path=path,
+            report_date="2026-01-01",
+        )
+        assert "## Proposed memory" in text
+        assert "memory" in text
+        assert "replace" in text
+
+    def test_applied_memory_section(self, tmp_path):
+        path = tmp_path / "nightly_digest.md"
+        text = generate_digest(
+            apply_results=[],
+            watch_results=[],
+            pending_patches=[],
+            memory_applied=[
+                {"target": "user", "action": "remove", "reason": "obsolete preference"}
+            ],
+            report_path=path,
+            report_date="2026-01-01",
+        )
+        assert "## Applied memory" in text
+        assert "obsolete preference" in text
+
+    def test_needs_review_memory_section(self, tmp_path):
+        path = tmp_path / "nightly_digest.md"
+        text = generate_digest(
+            apply_results=[],
+            watch_results=[],
+            pending_patches=[],
+            memory_results=[
+                {"target": "memory", "action": "replace", "status": "needs_review", "reason": "ambiguous"},
+                {"target": "memory", "action": "remove", "status": "failed", "reason": "blocked"},
+            ],
+            report_path=path,
+            report_date="2026-01-01",
+        )
+        assert "## Needs review" in text
+        assert "needs_review" in text
+        assert "failed" in text
+
+
 class TestFileOutput:
     def test_file_written_to_disk(self, tmp_path):
         path = tmp_path / "nightly_digest.md"
@@ -265,3 +315,36 @@ class TestFileOutput:
         nested = tmp_path / "deep" / "nested" / "digest.md"
         generate_digest([], [], [], report_path=nested, report_date="2026-01-01")
         assert nested.exists()
+
+
+class TestOperatorConfidenceSection:
+    def test_operator_confidence_section_present(self, tmp_path):
+        path = tmp_path / "nightly_digest.md"
+        text = generate_digest(
+            apply_results=[],
+            watch_results=[],
+            pending_patches=[],
+            operator_confidence={
+                "window_days": 30,
+                "patch_stability_ratio": 0.75,
+                "acceptance_to_regression_ratio": 2.5,
+                "memory_precision_proxy": 0.8,
+                "holdout_pass_rate": 0.6,
+            },
+            report_path=path,
+            report_date="2026-01-01",
+        )
+        assert "## Operator confidence" in text
+        assert "Patch stability ratio" in text
+
+    def test_operator_confidence_empty_fallback(self, tmp_path):
+        path = tmp_path / "nightly_digest.md"
+        text = generate_digest(
+            apply_results=[],
+            watch_results=[],
+            pending_patches=[],
+            operator_confidence=None,
+            report_path=path,
+            report_date="2026-01-01",
+        )
+        assert "No operator confidence metrics yet" in text

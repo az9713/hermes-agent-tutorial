@@ -285,3 +285,59 @@ class TestResultFields:
 
         if result["status"] == "accepted":
             assert result["rejection_reason"] == ""
+
+
+class TestDualJudgeAndHoldout:
+    def test_dual_judge_disagreement_holds(self):
+        def primary(messages):
+            last = messages[-1]["content"]
+            if "Score the following" in last:
+                return "9" if "new" in last.lower() else "5"
+            if "## Skill" in last:
+                return "new response " * 20 if "feat/<ticket-id>" in last else "old response " * 20
+            return "task"
+
+        def secondary(messages):
+            last = messages[-1]["content"]
+            if "Score the following" in last:
+                return "2" if "new" in last.lower() else "8"
+            if "## Skill" in last:
+                return "new response " * 20 if "feat/<ticket-id>" in last else "old response " * 20
+            return "task"
+
+        result = evaluate_candidate(
+            CANDIDATE,
+            OLD_SKILL,
+            TASKS,
+            primary,
+            judge_llm_call=secondary,
+            n_tasks=1,
+        )
+        assert result["status"] == "hold"
+        assert result["dual_judge_disagreement"] is True
+
+    def test_holdout_quality_gate_rejects(self):
+        def llm(messages):
+            last = messages[-1]["content"]
+            if "Score the following" in last:
+                if "Task: holdout-fail" in last and "feat/<ticket-id>" in last:
+                    return "3"
+                if "Task: holdout-fail" in last:
+                    return "8"
+                return "8"
+            if "## Skill" in last:
+                if "Task\nholdout-fail" in last and "feat/<ticket-id>" in last:
+                    return "new bad"
+                return "good response " * 20
+            return "task"
+
+        result = evaluate_candidate(
+            CANDIDATE,
+            OLD_SKILL,
+            TASKS,
+            llm,
+            n_tasks=1,
+            holdout_tasks=["holdout-fail"],
+        )
+        assert result["status"] == "rejected"
+        assert result["holdout_task_count"] == 1

@@ -200,8 +200,15 @@ def run_full_loop(
     digest_path: Optional[Path] = None,
     run_regression_watch: bool = True,
     skip_stage2: bool = False,
+    enable_memory_updates: bool = True,
+    run_memory_apply: bool = True,
+    pending_memory_updates_path: Optional[Path] = None,
     state_path: Optional[Path] = None,
     llm_call=None,
+    judge_llm_call=None,
+    enable_holdout_eval: bool = True,
+    holdout_days: int = 30,
+    holdout_tasks_per_skill: int = 20,
 ) -> str:
     """Run the full nightly autoresearch loop: Stage 1 → Stage 2 → Stage 3.
 
@@ -246,6 +253,12 @@ def run_full_loop(
                 patches_path=patches_path,
                 hermes_home=hermes_home,
                 llm_call=llm_call,
+                judge_llm_call=judge_llm_call,
+                enable_memory_updates=enable_memory_updates,
+                pending_memory_updates_path=pending_memory_updates_path,
+                enable_holdout_eval=enable_holdout_eval,
+                holdout_days=holdout_days,
+                holdout_tasks_per_skill=holdout_tasks_per_skill,
             )
             logger.info("Stage 2 complete")
         except ImportError as e:
@@ -271,6 +284,7 @@ def run_full_loop(
             hermes_home=hermes_home,
             dry_run=dry_run,
             run_regression_watch=run_regression_watch,
+            run_memory_apply=run_memory_apply,
         )
         logger.info("Stage 3 complete")
     except Exception as e:

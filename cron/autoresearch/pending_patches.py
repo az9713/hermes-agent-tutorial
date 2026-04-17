@@ -45,7 +45,7 @@ def _build_entry(
 ) -> Dict[str, Any]:
     """Merge a CandidatePatch and an EvalResult into one pending_patches entry."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {
+    entry = {
         "skill_name": candidate["skill_name"],
         "anomaly_type": candidate["anomaly_type"],
         "trigger_metric": candidate["trigger_metric"],
@@ -62,6 +62,23 @@ def _build_entry(
         "rejection_reason": eval_result.get("rejection_reason", ""),
         "generated_at": now,
     }
+    # Optional extended evaluation fields (holdout, rubric, dual-judge).
+    for key in (
+        "holdout_task_count",
+        "holdout_token_delta",
+        "holdout_quality_delta",
+        "holdout_pass",
+        "rubric_pass_rate_old",
+        "rubric_pass_rate_new",
+        "holdout_rubric_pass_rate_old",
+        "holdout_rubric_pass_rate_new",
+        "dual_judge_disagreement",
+        "primary_quality_delta",
+        "secondary_quality_delta",
+    ):
+        if key in eval_result:
+            entry[key] = eval_result[key]
+    return entry
 
 
 def write_pending_patches(

@@ -134,6 +134,52 @@ class TestStatusCmd:
         out = capsys.readouterr().out
         assert "never" in out
 
+    def test_status_shows_memory_outcome_counts(self, capsys, tmp_path):
+        with (
+            patch("hermes_cli.autoresearch._load_config", return_value=AR_CONFIG),
+            patch("hermes_cli.autoresearch._load_run_state", return_value=OK_STATE),
+            patch(
+                "hermes_cli.autoresearch._memory_update_counts",
+                return_value={
+                    "proposed": 1,
+                    "pending_revalidation": 2,
+                    "needs_review": 3,
+                    "applied": 4,
+                    "discarded": 5,
+                    "failed": 6,
+                },
+            ),
+            patch("hermes_cli.autoresearch._get_hermes_home", return_value=tmp_path),
+        ):
+            autoresearch_command(make_args(autoresearch_cmd="status"))
+        out = capsys.readouterr().out
+        assert "memory outcomes" in out
+        assert "applied:             4" in out
+        assert "discarded:           5" in out
+        assert "failed:              6" in out
+
+    def test_status_shows_operator_confidence_block(self, capsys, tmp_path):
+        with (
+            patch("hermes_cli.autoresearch._load_config", return_value=AR_CONFIG),
+            patch("hermes_cli.autoresearch._load_run_state", return_value=OK_STATE),
+            patch("hermes_cli.autoresearch._memory_update_counts", return_value={}),
+            patch(
+                "hermes_cli.autoresearch._operator_confidence_metrics",
+                return_value={
+                    "patch_stability_ratio": 0.75,
+                    "acceptance_to_regression_ratio": 2.0,
+                    "memory_precision_proxy": 0.80,
+                    "holdout_pass_rate": 0.65,
+                },
+            ),
+            patch("hermes_cli.autoresearch._get_hermes_home", return_value=tmp_path),
+        ):
+            autoresearch_command(make_args(autoresearch_cmd="status"))
+        out = capsys.readouterr().out
+        assert "operator confidence" in out
+        assert "patch_stability_ratio" in out
+        assert "holdout_pass_rate" in out
+
 
 # ── `schedule` subcommand ─────────────────────────────────────────────────────
 
@@ -204,6 +250,29 @@ class TestPatchesCmd:
             autoresearch_command(make_args(autoresearch_cmd="patches"))
         out = capsys.readouterr().out
         assert "git-workflow" in out
+
+    def test_patches_shows_recent_memory_outcomes(self, capsys, tmp_path):
+        (tmp_path / "autoresearch").mkdir()
+        (tmp_path / "autoresearch" / "pending_patches.json").write_text("[]")
+        (tmp_path / "autoresearch" / "pending_memory_updates.json").write_text("[]")
+        with (
+            patch("hermes_cli.autoresearch._get_hermes_home", return_value=tmp_path),
+            patch(
+                "hermes_cli.autoresearch._recent_memory_outcomes",
+                return_value=[
+                    {
+                        "target": "memory",
+                        "action": "replace",
+                        "status": "needs_review",
+                        "error": "Multiple entries matched",
+                    }
+                ],
+            ),
+        ):
+            autoresearch_command(make_args(autoresearch_cmd="patches"))
+        out = capsys.readouterr().out
+        assert "Recent memory outcomes" in out
+        assert "needs_review" in out
 
 
 # ── `enable` / `disable` subcommands ─────────────────────────────────────────

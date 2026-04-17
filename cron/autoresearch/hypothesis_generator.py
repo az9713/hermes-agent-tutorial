@@ -1,24 +1,12 @@
 """
-hypothesis_generator.py — Given an UNDERPERFORMING anomaly, call an LLM to
-propose a targeted patch for the skill.
-
-The LLM is injected as a callable so this module is testable without importing
-from agent/auxiliary_client.py (which has live provider dependencies).
-
-Interface:
-  LlmCall = Callable[[list[dict]], str]
-    Receives a messages list (OpenAI-style) and returns the assistant text.
-
-Public API:
-  generate_hypothesis(anomaly, skill_content, session_excerpts, llm_call)
-    → CandidatePatch | None
+hypothesis_generator.py -- Generate targeted skill patches from anomalies.
 """
+
+from __future__ import annotations
 
 import json
 import re
 from typing import Any, Callable, Dict, List, Optional
-
-# ── Types ─────────────────────────────────────────────────────────────────────
 
 LlmCall = Callable[[List[Dict[str, str]]], str]
 
@@ -26,15 +14,13 @@ CandidatePatch = Dict[str, Any]
 """
 Keys:
   skill_name      str
-  anomaly_type    str   — always "UNDERPERFORMING" for Stage 2
-  trigger_metric  str   — e.g. "correction_rate=0.41"
-  old_string      str   — exact text to replace in SKILL.md
-  new_string      str   — replacement text
-  reason          str   — human-readable reason for the patch
-  raw_llm_output  str   — the full LLM response (for debugging)
+  anomaly_type    str
+  trigger_metric  str
+  old_string      str
+  new_string      str
+  reason          str
+  raw_llm_output  str
 """
-
-# ── Prompt templates ──────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
 You are a skill improvement expert for an AI agent system called Hermes.
@@ -44,9 +30,14 @@ handle specific task types.
 Your job: analyse evidence from real sessions where this skill performed
 poorly, identify the specific gap, and propose a minimal targeted patch.
 
+Anomaly guidance:
+- UNDERPERFORMING: tighten clarity and remove avoidable correction loops.
+- STRUCTURALLY_BROKEN: repair broken flow/ordering and reduce inefficiency.
+- MISSING_COVERAGE: add explicit missing branches/examples for repeated correction scenarios.
+
 Rules for your patch:
 1. old_string must appear verbatim in the current SKILL.md. Quote it exactly.
-2. new_string is the replacement — improve or clarify the problematic section.
+2. new_string is the replacement -- improve or clarify the problematic section.
 3. The patch must be minimal: change only what is needed to fix the gap.
 4. Do not rewrite the entire skill. Only patch the specific problem.
 5. If you cannot identify a specific gap (not enough evidence), respond with:
@@ -68,7 +59,7 @@ _USER_TEMPLATE = """\
 {skill_content}
 ```
 
-### Session excerpts (worst sessions — user corrections only)
+### Session excerpts (worst sessions -- user corrections only)
 {excerpts_block}
 
 ### Instructions
@@ -92,8 +83,6 @@ Or if no patch is identifiable:
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 def _format_excerpts(session_excerpts: List[str]) -> str:
     if not session_excerpts:
         return "_No excerpts provided._"
@@ -106,37 +95,24 @@ def _format_excerpts(session_excerpts: List[str]) -> str:
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Extract the first JSON object from an LLM response.
-
-    Tries direct parse first, then strips markdown fences, then regex.
-    Returns None if no valid JSON found.
-    """
-    # Try direct parse
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
         pass
-
-    # Strip markdown code fences
     stripped = re.sub(r"```(?:json)?\s*", "", text).strip()
     stripped = re.sub(r"```\s*$", "", stripped).strip()
     try:
         return json.loads(stripped)
     except json.JSONDecodeError:
         pass
-
-    # Find first {...} block
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group())
         except json.JSONDecodeError:
             pass
-
     return None
 
-
-# ── Public API ────────────────────────────────────────────────────────────────
 
 def generate_hypothesis(
     anomaly: Dict[str, Any],
@@ -144,22 +120,7 @@ def generate_hypothesis(
     session_excerpts: List[str],
     llm_call: LlmCall,
 ) -> Optional[CandidatePatch]:
-    """Ask the LLM to propose a patch for an underperforming skill.
-
-    Args:
-        anomaly:          Anomaly dict from detect_anomalies().
-        skill_content:    Current contents of the skill's SKILL.md file.
-        session_excerpts: List of user-correction strings from worst sessions
-                          (up to 5). May be empty.
-        llm_call:         Callable(messages: list[dict]) -> str.
-                          Receives OpenAI-style messages, returns assistant text.
-
-    Returns:
-        CandidatePatch dict if the LLM proposes a patch, or None if:
-          - The LLM says no patch is identifiable.
-          - The LLM response cannot be parsed.
-          - The proposed old_string is not found in skill_content.
-    """
+    """Ask the LLM to propose a patch for an anomalous skill."""
     user_content = _USER_TEMPLATE.format(
         skill_name=anomaly["skill_name"],
         anomaly_type=anomaly["anomaly_type"],
@@ -175,23 +136,17 @@ def generate_hypothesis(
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
-
     raw_output = llm_call(messages)
     parsed = _extract_json(raw_output)
-
     if parsed is None:
         return None
-
     patch_data = parsed.get("patch")
     if patch_data is None:
-        # LLM said no patch possible
         return None
 
     old_string = patch_data.get("old_string", "")
     new_string = patch_data.get("new_string", "")
     reason = patch_data.get("reason", "")
-
-    # Validate: old_string must appear in the current skill content
     if not old_string or old_string not in skill_content:
         return None
 
